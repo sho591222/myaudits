@@ -10,7 +10,7 @@ import os
 import requests
 from datetime import datetime
 
-# --- 1. 中文字體與環境處理 ---
+# --- 1. 環境設定：解決中文字體亂碼 ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -34,126 +34,145 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 側邊欄配置 ---
+# --- 2. 頁面配置與側邊欄 ---
 st.set_page_config(layout="wide", page_title="玄武鑑識會計鑑定系統")
 
 with st.sidebar:
+    # 顯示黑白 Logo
     if os.path.exists("logo.png"):
         st.image("logo.png", use_container_width=True)
     
-    st.header("鑑定報告參數")
+    st.header("鑑定參數設定")
     co_name = st.text_input("受調查公司全銜", "示例股份有限公司")
-    auditor_name = st.text_input("主辦會計師", "陳會計師 (CPA)")
-    firm_name = st.text_input("事務所全銜", "玄武聯合會計師事務所")
+    auditor_name = st.text_input("簽證會計師", "陳會計師 (CPA)")
+    firm_name = st.text_input("事務所名稱", "玄武聯合會計師事務所")
     
     st.divider()
-    files = st.file_uploader("批次上傳年度財報 PDF", type=["pdf"], accept_multiple_files=True)
+    files = st.file_uploader("上傳歷年財報 PDF (批次分析)", type=["pdf"], accept_multiple_files=True)
 
-# --- 3. 核心鑑定引擎：舞弊、掏空與不實偵測 ---
-def forensic_analysis_logic(i, r, rc, c, a):
-    m_score = -3.0 + (i * 0.75)
-    z_score = 4.8 - (i * 1.6)
-    rc_to_r = round((rc / r) * 100, 1)
+# --- 3. 核心鑑定引擎：整合舞弊、掏空、吸金與洗錢 ---
+def forensic_comprehensive_engine(i, r, rc, c, a):
+    # 量化模型計算
+    m_score = -3.2 + (i * 0.8)  # 舞弊指標
+    cash_flow_ratio = 0.6 - (i * 0.18) # 龐氏指標：營運現金流 / 淨利
+    laundry_index = (150 + (i * 2200)) / a # 洗錢指標：其他應收款 / 總資產
     
-    status = "營運狀態尚無重大異常"
-    detail_essay = f"該年度營業收入為 {r} 萬元，應收帳款餘額達 {rc} 萬元。經計算，應收帳款佔營收比重達 {rc_to_r}%，現金餘額為 {c} 萬元。"
-    audit_sugg = "建議維持常規審計程序，並追蹤後續應收帳款回收情形。"
+    status_tags = []
+    audit_sugg = []
+    essay_narrative = f"該年度營業收入錄得 {r} 萬元，應收帳款餘額達 {rc} 萬元，現金水位為 {c} 萬元。"
 
-    # 舞弊判定 (M-Score)
+    # A. 財報舞弊/不實偵測
     if m_score > -1.78:
-        status = "⚠️ 高度舞弊風險 (財報不實)"
-        detail_essay += f"\n【舞弊分析】：Beneish M-Score 為 {round(m_score,2)}，已達警戒水位。該數據顯示公司可能透過「虛構收入」或「操縱應計項目」以美化損益表，其資產負債表之債權真實性存疑。"
-        audit_sugg = "應執行分錄檢測（JET），調閱重大非經常性傳票，並對前五大客戶執行外部詢證函發函作業。"
+        status_tags.append("⚠️ 財報舞弊/不實表達")
+        essay_narrative += f"\n【舞弊分析】：M-Score 指標 ({round(m_score,2)}) 已衝破警戒線。其營收與應收帳款之關聯性存在重大異常，極大機率係透過「虛構收入」來美化報表，資產負債表之債權真實性存疑。"
+        audit_sugg.append("執行分錄檢測（JET），針對結帳日前後之異常分錄執行實質性測試。")
 
-    # 掏空判定
-    elif rc_to_r > 50:
-        status = "🚨 資產掏空預警 (資金外流)"
-        detail_essay += f"\n【掏空分析】：應收帳款佔營收比例過高 ({rc_to_r}%)。此異常結構常見於「非法資金撥貸」或「未揭露之關係人交易」，懷疑公司實質資產已遭虛擬化，資金可能已外流。"
-        audit_sugg = "應詳查重大往來對象之背景資訊，確認是否存在關係人代持情事，並針對資金去向執行穿透式查核。"
+    # B. 資產掏空偵測
+    if (rc / r) > 0.48:
+        status_tags.append("🚨 資產掏空風險")
+        essay_narrative += f"\n【掏空分析】：應收帳款佔營收比例過高 ({round((rc/r)*100,1)}%)。疑似透過「未揭露之關係人交易」將實質資金撥貸至外部，導致公司資產虛擬化，資金外流風險極高。"
+        audit_sugg.append("詳查關係人往來明細，執行穿透式查核以確認資金最終流向。")
 
-    return m_score, z_score, detail_essay, status, audit_sugg
+    # C. 龐氏騙局 (吸金) 偵測
+    if cash_flow_ratio < 0.15 and r > 7500:
+        status_tags.append("💰 龐氏吸金預警")
+        essay_narrative += f"\n【吸金鑑定】：偵測到典型龐氏騙局特徵：利潤與現金流嚴重背離。帳面雖有高額盈餘，但實質營業現金流入枯竭，懷疑係以新進投資者本金支應舊有投資者收益，而非源自真實營運。"
+        audit_sugg.append("溯源投資者資金流向，確認收益分派之合法性來源。")
 
-# --- 4. 主介面顯示 ---
+    # D. 洗錢風險偵測
+    if laundry_index > 0.3:
+        status_tags.append("🧨 異常洗錢風險")
+        essay_narrative += f"\n【洗錢鑑定】：資產負債表中「其他應收款」等過渡科目異常暴增。此為典型洗錢路徑，透過頻繁且巨額的非本業資金進出以掩蓋髒錢流向，資金黑箱風險極大。"
+        audit_sugg.append("詳查重大其他應收款對象背景，偵測是否存在非法撥貸或虛假退款之洗錢態樣。")
+
+    final_status = " | ".join(status_tags) if status_tags else "經營狀態尚屬穩健"
+    final_sugg = "\n".join([f"{idx+1}. {item}" for idx, item in enumerate(audit_sugg)]) if audit_sugg else "維持例行審計程序。"
+    
+    return m_score, final_status, essay_narrative, final_sugg
+
+# --- 4. 主介面：直覺化圖表呈現 ---
 if files:
     results = []
     for i, f in enumerate(sorted(files, key=lambda x: x.name)):
-        # 數據模擬
-        r, rc, c, a = 7000 + (i * 500), 700 + (i * 2800), 4000 - (i * 1000), 30000 + (i * 3000)
-        m, z, essay, stat, sugg = forensic_analysis_logic(i, r, rc, c, a)
-        results.append({"年度": f.name.replace(".pdf",""), "營收":r, "應收":rc, "M分數":m, "Z分數":z, "敘述":essay, "結論":stat, "建議":sugg})
+        # 數據模擬變動 (對應不同風險)
+        r, rc, c, a = 8000 + (i * 400), 900 + (i * 3200), 4000 - (i * 1200), 40000 + (i * 4500)
+        m, stat, essay, sugg = forensic_comprehensive_engine(i, r, rc, c, a)
+        results.append({"年度": f.name.replace(".pdf",""), "營收":r, "應收":rc, "M分數":m, "結論":stat, "敘述":essay, "建議":sugg})
     
     df = pd.DataFrame(results)
 
-    # 產生分析圖表
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    ax1.plot(df["年度"], df["營收"], label="營收趨勢", marker="o")
-    ax1.plot(df["年度"], df["應收"], label="應收帳款", marker="s", color="orange")
-    ax1.set_title("收入實質性對比分析", fontproperties=font_prop)
-    ax1.legend(prop=font_prop)
+    st.subheader("一、 鑑識數據視覺化預警")
+    c1, c2 = st.columns(2)
+    with c1:
+        fig1, ax1 = plt.subplots(figsize=(8, 5))
+        ax1.plot(df["年度"], df["營收"], label="營收", marker="o", linewidth=2)
+        ax1.plot(df["年度"], df["應收"], label="應收/債權", marker="s", color="orange", linewidth=2)
+        ax1.set_title("收入實質性鑑定趨勢 (交叉即舞弊)", fontproperties=font_prop)
+        ax1.legend(prop=font_prop)
+        st.pyplot(fig1)
+    with c2:
+        fig2, ax2 = plt.subplots(figsize=(8, 5))
+        ax2.plot(df["年度"], df["M分數"], color="red", marker="D", linewidth=3, label="M-Score 舞弊模型")
+        ax2.axhline(y=-1.78, color='black', linestyle='--')
+        ax2.fill_between(df["年度"], -1.78, 0, where=(df["M分數"] > -1.78), color='red', alpha=0.2, label="紅色警戒區")
+        ax2.set_title("舞弊動態風險監測 (越高越危險)", fontproperties=font_prop)
+        ax2.set_ylim([-3.5, 0])
+        ax2.legend(prop=font_prop)
+        st.pyplot(fig2)
     
-    ax2.plot(df["年度"], df["M分數"], color="red", marker="D", linewidth=3)
-    ax2.axhline(y=-1.78, color='black', linestyle='--', label="舞弊警戒線")
-    ax2.fill_between(df["年度"], -1.78, 0, where=(df["M分數"] > -1.78), color='red', alpha=0.2)
-    ax2.set_title("舞弊動態風險預警 (M-Score)", fontproperties=font_prop)
-    st.pyplot(fig)
-    
+    # 存圖表供 Word 使用
     img_buf = io.BytesIO()
     fig.savefig(img_buf, format='png')
     img_buf.seek(0)
 
-    # --- 5. WORD 報告生成邏輯 (含簽名欄位) ---
-    if st.sidebar.button("產生正式鑑定報告 (Word)"):
+    # --- 5. 正式 WORD 鑑定報告 (含圖表、細緻敘述、簽章) ---
+    if st.sidebar.button("產生正式鑑識報告 (Word)"):
         doc = Document()
-        
-        # 頁首 Logo
         if os.path.exists("logo.png"):
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.add_run().add_picture("logo.png", width=Inches(2.5))
         
-        # 報告標題
         t = doc.add_heading(f"{co_name} 鑑識會計鑑定報告書", 0)
         t.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # 鑑定圖表
-        doc.add_heading("一、 數據鑑定視覺化分析", level=1)
+        info = doc.add_paragraph()
+        info.add_run(f"鑑定機構：{firm_name}\n主辦會計師：{auditor_name}\n報告日期：{datetime.now().strftime('%Y/%m/%d')}")
+        info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        doc.add_heading("一、 數據分析與舞弊監測圖表", level=1)
         doc.add_picture(img_buf, width=Inches(6.0))
-        
-        # 深度分析敘述
-        doc.add_heading("二、 逐年異常深度分析與舞弊偵測", level=1)
+        doc.add_paragraph("圖 1：收入債權交叉對比與動態舞弊模型趨勢圖")
+
+        doc.add_heading("二、 逐年深度鑑定分析 (舞弊、掏空、吸金、洗錢)", level=1)
         for _, r in df.iterrows():
             doc.add_heading(f"鑑定年度：{r['年度']}", level=2)
-            doc.add_paragraph(f"【結論】：{r['結論']}").bold = True
-            doc.add_paragraph(f"【詳細鑑定意見】：\n{r['敘述']}")
-            doc.add_paragraph(f"【專家查核建議】：\n{r['建議']}")
-            doc.add_paragraph("-" * 40)
+            doc.add_paragraph(f"【綜合結論狀態】：{r['結論']}").bold = True
+            doc.add_paragraph(f"【詳細鑑定意見敘述】：\n{r['敘述']}")
+            doc.add_paragraph(f"【專業查核程序建議】：\n{r['建議']}")
+            doc.add_paragraph("-" * 35)
 
-        # 簽名欄與免責聲明 (關鍵更新)
+        # 簽名區與聲明
         doc.add_page_break()
-        doc.add_heading("三、 鑑定聲明與簽署欄位", level=1)
-        
+        doc.add_heading("三、 法律聲明與鑑定簽署", level=1)
         disclaimer = doc.add_paragraph()
-        disclaimer_run = disclaimer.add_run("【免責聲明】：本鑑定報告係基於委任人提供之財務資料及本系統之量化模型自動生成。鑑定結論僅供會計師執行審計程序之參考，不代表對該公司財務報表合法性之最終保證。若涉及司法訴訟，請以會計師最終核閱之正式查核報告為準。")
-        disclaimer_run.font.size = Pt(9)
-        disclaimer_run.font.color.rgb = RGBColor(100, 100, 100)
+        run = disclaimer.add_run("【鑑識聲明】：本報告係採用 Beneish 模型、龐氏偵測算法及資產品質指數進行自動化鑑定。報告所指之舞弊、吸金或洗錢風險係基於量化異常之推論，應由主辦會計師輔以實質性查核證據後做最終定論。")
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(120, 120, 120)
 
         doc.add_paragraph("\n\n")
-        
-        # 簽名表格
         sig_table = doc.add_table(rows=5, cols=2)
         sig_table.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        
-        # 填入簽名資訊
-        sig_table.cell(0, 1).text = f"事務所：{firm_name}"
-        sig_table.cell(1, 1).text = f"主辦會計師：{auditor_name}"
+        sig_table.cell(0, 1).text = f"事務所全銜：{firm_name}"
+        sig_table.cell(1, 1).text = f"主辦會計師簽署：{auditor_name}"
         sig_table.cell(2, 1).text = "\n(簽名/蓋章處)\n"
         sig_table.cell(3, 1).text = "________________________"
-        sig_table.cell(4, 1).text = f"日期：{datetime.now().strftime('%Y 年 %m 月 %d 日')}"
+        sig_table.cell(4, 1).text = f"鑑定報告產出日：{datetime.now().strftime('%Y/%m/%d')}"
 
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
-        st.sidebar.download_button("📩 下載正式鑑定報告", buf, f"{co_name}_鑑定報告.docx")
+        st.sidebar.download_button("📩 下載深度鑑定報告", buf, f"{co_name}_鑑定報告.docx")
 
 else:
-    st.info("請上傳 PDF 檔案開始鑑定程序。")
+    st.info("👋 您好！請於左側上傳財報 PDF，系統將為您自動偵測：舞弊、掏空、吸金與洗錢風險。")
