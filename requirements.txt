@@ -4,3 +4,8 @@ pdfplumber
 matplotlib
 python-docx
 requests
+streamlit
+pandas
+matplotlib
+python-docx
+requests
