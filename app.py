@@ -9,9 +9,8 @@ import matplotlib.font_manager as fm
 import os
 import requests
 from datetime import datetime
-import collections
 
-# --- 1. 環境設定 ---
+# --- 1. 環境設定：中文字體 ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -35,114 +34,113 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 鑑識邏輯工具箱 ---
-def get_benford_score(data_list):
-    """簡易班佛定律偵測：計算數字首位數分布偏移度"""
-    first_digits = [int(str(abs(x))[0]) for x in data_list if x != 0]
-    counts = collections.Counter(first_digits)
-    # 理想值 1 的出現機率約 30%
-    one_ratio = counts.get(1, 0) / len(first_digits) if first_digits else 0.3
-    return "正常" if 0.25 <= one_ratio <= 0.35 else "異常偏移"
-
-def forensic_engine_v2(r, rc, inv, c, a, ni, ocf):
-    """
-    全面鑑定引擎 V2
-    r:營收, rc:應收, inv:存貨, c:現金, a:總資產, ni:淨利, ocf:營業現金流
-    """
+# --- 2. 核心鑑識邏輯引擎 ---
+def forensic_analysis_logic(row):
+    # 讀取 Excel 欄位數據
+    r = row.get('營收', 0)
+    rc = row.get('應收帳款', 0)
+    inv = row.get('存貨', 0)
+    c = row.get('現金', 0)
+    a = row.get('總資產', 0)
+    ni = row.get('淨利', 0)
+    ocf = row.get('營業現金流', 0)
+    
+    # 指標計算
     m_score = -3.2 + (0.1 * (rc/r if r!=0 else 0)) + (0.2 * (inv/r if r!=0 else 0))
-    ponzi_index = ocf / ni if ni > 0 else 0
-    laundry_index = (rc + inv) / a if a > 0 else 0
+    cash_ratio = ocf / ni if ni > 0 else 0
     
     tags = []
-    sugg = []
+    if m_score > -1.78: tags.append("財報舞弊高風險")
+    if (rc / r) > 0.45 if r!=0 else False: tags.append("資產掏空警訊")
+    if cash_ratio < 0.15 and ni > 0: tags.append("龐氏吸金預警")
+    if (rc + inv) / a > 0.4 if a!=0 else False: tags.append("異常洗錢風險")
     
-    # 舞弊與掏空
-    if m_score > -1.78:
-        tags.append("財報舞弊高風險")
-        sugg.append("執行收入實質性測試，查核應收帳款真實性。")
-    if (rc / r) > 0.5:
-        tags.append("資產掏空警訊")
-        sugg.append("針對大額應收帳款對象執行關係人身分穿透。")
-        
-    # 吸金 (龐氏)
-    if ponzi_index < 0.2 and ni > 1000:
-        tags.append("龐氏吸金預警")
-        sugg.append("核對利潤來源是否僅為帳面應計，並追查利息發放之現金來源。")
-        
-    # 洗錢
-    if laundry_index > 0.4:
-        tags.append("異常資金洗錢風險")
-        sugg.append("查核存貨與往來款科目，是否存在虛假交易循環。")
-        
-    return m_score, " | ".join(tags) if tags else "未見明顯異常", sugg
+    return pd.Series([m_score, " | ".join(tags) if tags else "未見明顯異常"])
 
-# --- 3. 介面設計 ---
-st.set_page_config(layout="wide", page_title="玄武鑑識會計系統 V2")
+# --- 3. 頁面配置 ---
+st.set_page_config(layout="wide", page_title="玄武鑑識會計鑑定系統 V2")
 
 with st.sidebar:
     if os.path.exists("logo.png"):
         st.image("logo.png", use_container_width=True)
-    st.header("系統模式選擇")
-    app_mode = st.radio("請選擇分析範疇", ["單一公司歷年診斷", "多公司橫向評比"])
+    st.header("數據與報告設定")
+    auditor_name = st.text_input("主辦會計師", "張鈞翔會計師")
+    firm_name = st.text_input("事務所名稱", "玄武聯合會計師事務所")
     
     st.divider()
-    auditor_name = st.text_input("簽證會計師", "張鈞翔會計師")
-    firm_name = st.text_input("事務所名稱", "玄武聯合會計師事務所")
-    files = st.file_uploader("批次上傳財報 PDF", type=["pdf"], accept_multiple_files=True)
+    uploaded_file = st.file_uploader("上傳數據底稿 (Excel 或 CSV)", type=["xlsx", "csv"])
 
-# --- 4. 執行分析 ---
-if files:
-    data_rows = []
-    for i, f in enumerate(sorted(files, key=lambda x: x.name)):
-        # 模擬數據：此處在實務中應由 PDF 轉文字解析
-        year_or_co = f.name.replace(".pdf", "")
-        # 為了展示效果，模擬不同風險數據
-        r, rc, inv, c, a = 10000 + (i*500), 2000 + (i*2500), 1000 + (i*800), 5000 - (i*1000), 50000
-        ni, ocf = 2000, 300 - (i*50)
-        
-        m, stat, suggs = forensic_engine_v2(r, rc, inv, c, a, ni, ocf)
-        data_rows.append({
-            "標的": year_or_co, "營收": r, "應收": rc, "存貨": inv, 
-            "現金": c, "資產": a, "M分數": m, "鑑定結論": stat, "建議": "\n".join(suggs)
-        })
+# --- 4. 數據處理與分析 ---
+if uploaded_file:
+    if uploaded_file.name.endswith('.xlsx'):
+        df = pd.read_excel(uploaded_file)
+    else:
+        df = pd.read_csv(uploaded_file)
     
-    df = pd.DataFrame(data_rows)
+    # 執行鑑定運算
+    df[['M分數', '鑑定結論']] = df.apply(forensic_analysis_logic, axis=1)
 
-    # 視覺化展示
-    st.header(f"鑑定成果：{app_mode}")
-    col1, col2 = st.columns(2)
+    st.header("數據鑑定分析看板")
     
-    with col1:
-        fig1, ax1 = plt.subplots(figsize=(8, 5))
-        ax1.bar(df["標的"], df["營收"], label="營收", color="skyblue")
-        ax1.plot(df["標的"], df["應收"], label="應收帳款", marker="o", color="orange")
-        ax1.set_title("營收與債權品質分析", fontproperties=font_prop)
-        ax1.legend(prop=font_prop)
-        st.pyplot(fig1)
-        
-    with col2:
-        fig2, ax2 = plt.subplots(figsize=(8, 5))
-        ax2.plot(df["標的"], df["M分數"], color="red", marker="x", label="舞弊指標")
-        ax2.axhline(y=-1.78, color='black', linestyle='--')
-        ax2.fill_between(df["標的"], -1.78, 0, color='red', alpha=0.1)
-        ax2.set_title("動態風險警戒監控", fontproperties=font_prop)
-        st.pyplot(fig2)
+    # 圖表呈現
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # 圖 1：規模與債權對比
+    df.plot(kind='bar', x=df.columns[0], y=['營收', '應收帳款'], ax=ax1, color=['#1f77b4', '#ff7f0e'])
+    ax1.set_title("營收與債權品質對比圖", fontproperties=font_prop)
+    
+    # 圖 2：M-Score 風險監測
+    ax2.plot(df[df.columns[0]], df['M分數'], color='red', marker='D', linewidth=2)
+    ax2.axhline(y=-1.78, color='black', linestyle='--')
+    ax2.fill_between(df[df.columns[0]], -1.78, df['M分數'].max()+0.5, where=(df['M分數'] > -1.78), color='red', alpha=0.2)
+    ax2.set_title("舞弊偵測模型警戒監控 (高於虛線為風險)", fontproperties=font_prop)
+    
+    st.pyplot(fig)
 
-    # 數據表與班佛定律
-    st.subheader("分析明細與數據合規性")
-    if app_mode == "單一公司歷年診斷":
-        ben_stat = get_benford_score(df["營收"].tolist())
-        st.warning(f"班佛定律首位數檢測結果：{ben_stat} (檢測財務數字是否符合自然分布)")
-    
+    # 數據表展示
+    st.subheader("鑑定底稿清單")
     st.dataframe(df)
 
-    # 網頁法律聲明
+    # 法律聲明
     st.divider()
-    st.caption("法律聲明：本報告係量化模型產出之初步診斷，不構成最終法律判定。鑑定效力以會計師簽署之正式報告為準。")
+    st.caption("法律聲明：本鑑定報告係由自動化模型產出，偵測結果屬風險預警性質。最終法律結論應以會計師簽署之正式紙本報告為準。")
 
-    # Word 生成邏輯 (略，與前版相同但包含更多欄位)
-    if st.sidebar.button("產生正式深度鑑定報告"):
-        st.success("報告已準備就緒，請點擊下方下載按鈕。")
-        # (此處可放置前述之 Word 生成代碼)
+    # --- 報告生成按鈕區 ---
+    col_dl1, col_dl2 = st.columns(2)
+    
+    with col_dl1:
+        # 下載 Excel 鑑定底稿
+        output_excel = io.BytesIO()
+        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='鑑定底稿')
+        st.download_button("下載 Excel 鑑定底稿", output_excel.getvalue(), "鑑定底稿.xlsx")
+
+    with col_dl2:
+        # 下載 Word 鑑定意見書
+        if st.button("準備 Word 報告資料"):
+            doc = Document()
+            if os.path.exists("logo.png"):
+                doc.add_picture("logo.png", width=Inches(2.0))
+            
+            doc.add_heading("鑑識會計鑑定意見書", 0).alignment = WD_ALIGN_PARAGRAPH.CENTER
+            doc.add_paragraph(f"事務所：{firm_name}\n會計師：{auditor_name}\n報告日期：{datetime.now().strftime('%Y/%m/%d')}")
+            
+            doc.add_heading("一、 鑑定結論摘要", level=1)
+            for _, row in df.iterrows():
+                p = doc.add_paragraph()
+                p.add_run(f"標的名稱：{row[df.columns[0]]}\n").bold = True
+                p.add_run(f"鑑定結論：{row['鑑定結論']}\n")
+                p.add_run(f"舞弊分數 (M-Score)：{round(row['M分數'], 2)}")
+
+            doc.add_page_break()
+            doc.add_heading("二、 法律聲明與簽章", level=1)
+            doc.add_paragraph("本報告偵測之異常態樣屬量化推論，旨在識別查核重點。鑑定結論之最終效力應由主辦會計師輔以實質查核程序後定論。")
+            
+            doc.add_paragraph("\n\n會計師簽署：____________________")
+            
+            buf_word = io.BytesIO()
+            doc.save(buf_word)
+            st.download_button("點此下載 Word 鑑定意見書", buf_word.getvalue(), "鑑定意見書.docx")
+
 else:
-    st.info("請上傳財報 PDF 檔案以啟動鑑定引擎。")
+    st.info("請上傳包含「營收、應收帳款、存貨、總資產、淨利、營業現金流」欄位的 Excel 檔案開始分析。")
