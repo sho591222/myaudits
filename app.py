@@ -10,7 +10,7 @@ import os
 import requests
 from datetime import datetime
 
-# --- 1. 環境設定：解決中文字體顯示 ---
+# --- 1. 環境設定：中文字體 ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -34,7 +34,7 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 頁面配置與側邊欄設定 ---
+# --- 2. 頁面配置 ---
 st.set_page_config(layout="wide", page_title="玄武鑑識會計鑑定系統")
 
 with st.sidebar:
@@ -49,7 +49,7 @@ with st.sidebar:
     st.divider()
     files = st.file_uploader("上傳歷年財報 PDF (批次分析)", type=["pdf"], accept_multiple_files=True)
 
-# --- 3. 核心鑑定引擎：舞弊、掏空、吸金、洗錢 ---
+# --- 3. 核心鑑定引擎 ---
 def forensic_comprehensive_engine(i, r, rc, c, a):
     m_score = -3.2 + (i * 0.8)
     cash_flow_ratio = 0.6 - (i * 0.18)
@@ -67,24 +67,24 @@ def forensic_comprehensive_engine(i, r, rc, c, a):
     if (rc / r) > 0.48:
         status_tags.append("資產掏空風險")
         essay_narrative += f"\n【掏空分析】：應收帳款佔營收比例過高。疑似資金透過未揭露之關係人交易外流。"
-        audit_sugg.append("詳查關係人往來明細，執行穿透式查核以確認資金最終流向。")
+        audit_sugg.append("詳查關係人往來明細，執行穿透式查核以確認資金流向。")
 
     if cash_flow_ratio < 0.15 and r > 7500:
         status_tags.append("龐氏吸金預警")
-        essay_narrative += f"\n【吸金鑑定】：偵測到利潤與現金流嚴重背離。帳面盈餘高但經營性現金流枯竭，具備龐氏騙局特徵。"
-        audit_sugg.append("對投資者資金來源進行溯源查核，確認收益來源是否為真實營運獲利。")
+        essay_narrative += f"\n【吸金鑑定】：偵測到利潤與現金流嚴重背離。帳面盈餘高但經營性現金流枯竭，具備龐氏特徵。"
+        audit_sugg.append("對投資者資金來源進行溯源查核。")
 
     if laundry_index > 0.3:
         status_tags.append("異常洗錢風險")
         essay_narrative += f"\n【洗錢鑑定】：其他應收款等過渡科目異常暴增。疑似透過非本業往來款掩蓋不明資金流向。"
-        audit_sugg.append("詳查重大其他應收款對象背景，偵測是否存在非法撥貸或虛假退款之洗錢態樣。")
+        audit_sugg.append("詳查重大其他應收款對象背景。")
 
     final_status = " | ".join(status_tags) if status_tags else "經營狀態尚屬穩健"
     final_sugg = "\n".join([f"{idx+1}. {item}" for idx, item in enumerate(audit_sugg)]) if audit_sugg else "維持例行審計程序。"
     
     return m_score, final_status, essay_narrative, final_sugg
 
-# --- 4. 主介面：視覺化圖表 ---
+# --- 4. 主介面顯示 ---
 if files:
     results = []
     for i, f in enumerate(sorted(files, key=lambda x: x.name)):
@@ -96,7 +96,6 @@ if files:
 
     st.subheader("一、 鑑識數據視覺化預警")
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    
     ax1.plot(df["年度"], df["營收"], label="營收", marker="o", linewidth=2)
     ax1.plot(df["年度"], df["應收"], label="應收/債權", marker="s", color="orange", linewidth=2)
     ax1.set_title("收入實質性鑑定趨勢 (交叉即警訊)", fontproperties=font_prop)
@@ -108,14 +107,25 @@ if files:
     ax2.set_title("舞弊動態風險監測 (越高越危險)", fontproperties=font_prop)
     ax2.set_ylim([-3.5, 0])
     ax2.legend(prop=font_prop)
-    
     st.pyplot(fig)
     
     img_buf = io.BytesIO()
     fig.savefig(img_buf, format='png', bbox_inches='tight')
     img_buf.seek(0)
 
-    # --- 5. Word 報告生成 (含法律聲明與簽章) ---
+    st.subheader("二、 逐年鑑定分析明細")
+    st.table(df[["年度", "結論", "M分數"]])
+
+    # --- 網頁端法律聲明區 ---
+    st.divider()
+    st.caption("【法律聲明與免責條款】")
+    st.info(
+        "1. 本系統產出之鑑定結果係基於 Beneish M-Score、龐氏偵測算法與洗錢指標等量化模型之自動化分析。\n"
+        "2. 本報告所指標註之風險態樣均屬數據異常推論，旨在協助專業人員識別查核重點，不構成對受調查公司之最終犯罪判定。\n"
+        "3. 鑑識結論之最終法律效力應以簽證會計師執行實質查核並核閱後之正式報告為準。"
+    )
+
+    # --- Word 報告生成 ---
     if st.sidebar.button("產生正式鑑識報告 (Word)"):
         doc = Document()
         if os.path.exists("logo.png"):
@@ -133,7 +143,7 @@ if files:
         doc.add_heading("一、 數據分析與舞弊監測圖表", level=1)
         doc.add_picture(img_buf, width=Inches(6.0))
 
-        doc.add_heading("二、 逐年深度鑑定分析 (含舞弊、掏空、吸金、洗錢)", level=1)
+        doc.add_heading("二、 逐年深度鑑定分析", level=1)
         for _, r in df.iterrows():
             doc.add_heading(f"年度：{r['年度']}", level=2)
             doc.add_paragraph(f"【綜合結論狀態】：{r['結論']}").bold = True
@@ -149,23 +159,21 @@ if files:
         run.bold = True
         
         content = (
-            "1. 本報告係基於委任人提供之財務數據，透過量化鑑識模型（包括但不限於 Beneish M-Score、龐氏偵測算法、資金洗錢流向指標）產出之初步鑑定結果。\n"
-            "2. 本系統所偵測之「舞弊」、「吸金」或「洗錢」風險指標係屬數據異常推論，旨在協助會計師識別高風險領域。鑑定結論之最終法律效力，應以會計師執行實質查核程序後出具之正式查核報告為準。\n"
-            "3. 本報告不構成對受調查公司財務報表合法性之最終保證。若將本報告用於司法訴訟，請務必由執業會計師進行簽署核閱，以符合法定鑑定之程序規範。"
+            "1. 本報告係透過量化鑑識模型產出之初步鑑定結果，鑑定結論之最終法律效力，應以會計師執行實質查核程序後出具之正式報告為準。\n"
+            "2. 本報告不構成對受調查公司財務報表合法性之最終保證。若將本報告用於司法訴訟，請務必由執業會計師進行簽署核閱，以符合法定鑑定程序。"
         )
         run_content = desc_p.add_run(content)
         run_content.font.size = Pt(9)
         run_content.font.color.rgb = RGBColor(80, 80, 80)
 
         doc.add_paragraph("\n\n")
-        
         sig_table = doc.add_table(rows=5, cols=2)
         sig_table.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         sig_table.cell(0, 1).text = f"鑑定機構：{firm_name}"
         sig_table.cell(1, 1).text = f"主辦會計師簽署：{auditor_name}"
-        sig_table.cell(2, 1).text = "\n(簽名/小官章蓋印處)\n"
+        sig_table.cell(2, 1).text = "\n(簽名/蓋章處)\n"
         sig_table.cell(3, 1).text = "________________________"
-        sig_table.cell(4, 1).text = f"鑑定報告產出日：{datetime.now().strftime('%Y/%m/%d')}"
+        sig_table.cell(4, 1).text = f"日期：{datetime.now().strftime('%Y/%m/%d')}"
 
         buf = io.BytesIO()
         doc.save(buf)
