@@ -170,22 +170,54 @@ if files:
             st.pyplot(fig3)
             
         st.dataframe(df[['公司名稱', '年度', '舞弊指標', '舞弊判定', '掏空風險', '吸金指標', '洗錢風險']])
-
-    # --- 7. 報告導出 ---
+ # --- 7. 報告導出 (強化敘述版) ---
     st.divider()
     if st.button("下載旗艦鑑定報告 (Word)"):
         doc = Document()
-        doc.add_heading("鑑識會計與財務預測鑑定報告", 0)
-        doc.add_paragraph(f"主辦會計師：{st.sidebar.text_input('會計師簽署', '張鈞翔會計師')}")
-        doc.add_paragraph(f"產出日期：{datetime.now().strftime('%Y/%m/%d')}")
+        # 設定標題
+        doc.add_heading("財務犯罪防制與鑑識會計鑑定報告書", 0).alignment = 1
         
-        doc.add_heading("一、 重大異常摘要", level=1)
-        for _, r in df[df['舞弊判定'] == "危險"].iterrows():
-            doc.add_paragraph(f"⚠️ 公司：{r['公司名稱']} ({r['年度']}) - 舞弊指標異常")
-            
+        # 報告基本資訊
+        p = doc.add_paragraph()
+        p.add_run(f"鑑定人：{auditor} 會計師\n").bold = True
+        p.add_run(f"產出日期：{datetime.now().strftime('%Y/%m/%d')}\n")
+        p.add_run(f"數據範圍：共計 {len(df['公司名稱'].unique())} 家受查企業之歷年財務數據")
+
+        doc.add_heading("一、 鑑定結論與重大異常摘要", level=1)
+        
+        # 篩選出有問題的公司進行詳細敘述
+        high_risk_df = df[(df['舞弊判定'] == "危險") | (df['掏空風險'] == "高風險") | (df['吸金指標'] == "警示")]
+        
+        if high_risk_df.empty:
+            doc.add_paragraph("經本系統鑑定，受查標的於各項犯罪預警模型中均呈現「正常」狀態，暫無重大財務操縱疑慮。")
+        else:
+            for _, r in high_risk_df.iterrows():
+                doc.add_heading(f"● 受查標的：{r['公司名稱']} ({r['年度']}年度)", level=2)
+                
+                # 詳細敘述邏輯
+                narrative = "本系統針對該年度進行深度鑑定，分析結果如下：\n"
+                
+                if r['舞弊判定'] == "危險":
+                    narrative += f"- 【財報舞弊】：M-Score 分數達 {r['舞弊指標']}，超過警戒線 (-1.78)。顯示該公司可能存在盈餘操縱、虛增資產或低估負債之高度風險。\n"
+                
+                if r['掏空風險'] == "高風險":
+                    narrative += f"- 【資產掏空】：偵測到應收帳款佔營收比例異常。懷疑存在虛假交易或關聯方資金挪用，可能正透過外部虛假訂單掏空公司核心資產。\n"
+                
+                if r['吸金指標'] == "警示":
+                    narrative += f"- 【非法吸金】：負債總額遠超現金額度且營收成長停滯。具備「以債養債」之龐氏騙局特徵，應嚴防投資人資金被非法挪用。\n"
+                
+                if r['洗錢風險'] == "高機率":
+                    narrative += f"- 【洗錢疑慮】：現金水位與帳面營收嚴重不匹配（比率低於 5%），存在大額金流去向不明之特徵，需進一步查核金流流向。\n"
+                
+                doc.add_paragraph(narrative)
+
+        doc.add_heading("二、 財務預測與未來風險評估", level=1)
+        doc.add_paragraph("本報告結合 AI 成長模型進行未來兩年之營收推估。若受查標的存在上述犯罪指標，其未來預測數據之達成度應持高度保留意見，並建議啟動實質查核程序（Substantive Testing）。")
+
+        doc.add_heading("三、 法律聲明", level=1)
+        doc.add_paragraph("本鑑定報告係基於上傳之數據進行演算法分析，鑑定結果供專業審計與司法鑑定參考。最終結論應以簽證會計師實地查核之簽證報告為準。")
+
+        # 匯出檔案
         buf = io.BytesIO()
         doc.save(buf)
-        st.download_button("點此匯出專業 Word 報告", buf.getvalue(), "鑑識預測報告.docx")
-
-else:
-    st.info("系統就緒。請從左側上傳數據開始鑑定。")
+        st.download_button("點此匯出完整鑑定報告 (含詳細敘述)", buf.getvalue(), "財務鑑定詳細報告.docx")
