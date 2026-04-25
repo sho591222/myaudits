@@ -61,7 +61,7 @@ st.markdown("<p>AI 財務鑑識與成長預測系統</p>", unsafe_allow_html=Tru
 with st.sidebar:
     st.header("控制台")
     st.text("玄武鑑定 真偽分明")
-    mode = st.radio("模式", ["深度鑑定", "競爭力PK"])
+    mode = st.radio("模式", ["單一公司", "多公司分析"])
     auditor = st.text_input("主辦會計師", "張鈞翔會計師")
     files = st.file_uploader("上傳財報", type=["pdf", "xlsx"], accept_multiple_files=True)
 
