@@ -7,135 +7,173 @@ import io
 import re
 import pdfplumber
 
-# 1. 系統環境與穩定性設定
+# 1. 系統環境設定
 st.set_page_config(layout="wide", page_title="玄武鑑識中心")
 
-# 移除所有表情符號，確保後端編碼不崩潰
 st.markdown("""
     <div style='background-color:#002b36; padding:20px; border-radius:10px; border-left: 10px solid #b58900;'>
         <h1 style='color:white; margin:0;'>玄武快機師事務所</h1>
-        <p style='color:#839496; margin:0;'>AI 財務鑑識旗艦平台：數值精準解析與風險預警</p>
+        <p style='color:#839496; margin:0;'>旗艦鑑定平台：舞弊、掏空與洗錢偵測模組</p>
     </div>
 """, unsafe_allow_html=True)
 
-# 2. 強效數值清理函數 (解決圖表點在 0 的關鍵)
-def strong_clean_val(v):
-    if v is None: return 0.0
-    s = str(v).strip()
-    # 處理會計格式：(1,234.56) 轉為 -1234.56
-    if '(' in s and ')' in s:
-        s = '-' + s.replace('(', '').replace(')', '')
-    # 移除千分位逗號、全形空格、百分比符號與所有中文
-    s = re.sub(r'[^\d\.\-]', '', s)
-    try:
-        return float(s) if s else 0.0
-    except:
-        return 0.0
+# 2. 強效數值提取器：能處理 (1,234), 1.234,56 以及格式混亂的文字
+def force_extract_numbers(row_list):
+    vals = []
+    for item in row_list:
+        if not item: continue
+        s = str(item).strip().replace(',', '')
+        # 處理會計負數格式 (xxx)
+        if '(' in s and ')' in s:
+            s = '-' + s.replace('(', '').replace(')', '')
+        # 提取純數字、負號與小數點
+        clean_s = "".join(re.findall(r'[0-9\.-]+', s))
+        try:
+            val = float(clean_s)
+            vals.append(val)
+        except:
+            continue
+    return vals
 
-# 3. 數據解析引擎 (PDF & Excel)
+# 3. 終極 PDF/Excel 解析引擎
 def parse_financial_data(file):
     try:
         res = {
-            "公司名稱": file.name.replace(".pdf", ""), 
-            "年度": None, "營收": 0.0, "應收帳款": 0.0, 
-            "存貨": 0.0, "現金": 0.0, "負債總額": 0.0, 
+            "公司名稱": file.name.replace(".pdf", ""), "年度": 0, "營收": 0.0, 
+            "應收帳款": 0.0, "存貨": 0.0, "現金": 0.0, "負債總額": 0.0, 
             "其他應收款": 0.0, "預付款項": 0.0
         }
         
         if file.name.endswith('.xlsx'):
-            df_xlsx = pd.read_excel(file)
-            df_xlsx.columns = [str(c).strip() for c in df_xlsx.columns]
-            rename_map = {"年份": "年度", "Year": "年度", "營業收入": "營收"}
-            df_xlsx = df_xlsx.rename(columns=rename_map)
-            # 數值列全部強制清理
-            for col in res.keys():
-                if col in df_xlsx.columns and col != "公司名稱":
-                    df_xlsx[col] = df_xlsx[col].apply(strong_clean_val)
-            return df_xlsx
+            df = pd.read_excel(file)
+            # 簡單處理 Excel 欄位對齊
+            for col in df.columns:
+                c_str = str(col)
+                if "年" in c_str: res["年度"] = df[col].iloc[0]
+                if "營" in c_str: res["營收"] = df[col].iloc[0]
+            return pd.DataFrame([res])
 
         with pdfplumber.open(file) as pdf:
-            for page in pdf.pages[:5]:
+            for page in pdf.pages[:6]:
+                # 抓取年度
                 text = page.extract_text() or ""
-                if not res["年度"]:
+                if res["年度"] == 0:
                     years = re.findall(r"(\d{3,4})\s*年度", text)
                     if years:
                         y = int(years[0])
                         res["年度"] = y + 1911 if y < 1000 else y
 
-                table = page.extract_table()
-                if not table: continue
-                for row in table:
-                    clean_row = [str(x) if x else "" for x in row]
-                    row_str = "".join(clean_row)
-                    
-                    # 關鍵科目抓取
-                    def get_last_val(r):
-                        for v in reversed(r):
-                            val = strong_clean_val(v)
-                            if val != 0: return val
-                        return 0.0
-
-                    if any(k in row_str for k in ["營收", "營業收入"]): res["營收"] = get_last_val(clean_row)
-                    if "應收帳款" in row_str: res["應收帳款"] = get_last_val(clean_row)
-                    if "存貨" in row_str: res["存貨"] = get_last_val(clean_row)
-                    if any(k in row_str for k in ["現金", "約當現金"]): res["現金"] = get_last_val(clean_row)
-                    if any(k in row_str for k in ["負債總額", "負債合計"]): res["負債總額"] = get_last_val(clean_row)
-                    if "其他應收款" in row_str: res["其他應收款"] = get_last_val(clean_row)
-                    if "預付款項" in row_str: res["預付款項"] = get_last_val(clean_row)
-
-        return pd.DataFrame([res]) if res["年度"] else pd.DataFrame()
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        row_str = "".join([str(x) for x in row if x])
+                        nums = force_extract_numbers(row)
+                        if not nums: continue
+                        
+                        # 根據關鍵字鎖定數值（取該行最後一個數字，通常是當期數）
+                        val = nums[-1]
+                        if any(k in row_str for k in ["營業收入", "營收"]): res["營收"] = val
+                        if "應收帳款" in row_str and "其他" not in row_str: res["應收帳款"] = val
+                        if "存貨" in row_str: res["存貨"] = val
+                        if any(k in row_str for k in ["現金", "約當現金"]): res["現金"] = val
+                        if any(k in row_str for k in ["負債總額", "負債合計"]): res["負債總額"] = val
+                        if "其他應收款" in row_str: res["其他應收款"] = val
+                        if "預付款項" in row_str: res["預付款項"] = val
+        
+        return pd.DataFrame([res]) if res["年度"] > 0 else pd.DataFrame()
     except:
         return pd.DataFrame()
 
-# 4. 鑑識邏輯
+# 4. 鑑識邏輯計算
 def run_forensics(df):
-    df['M分數'] = 0.0
-    df['舞弊風險'] = "正常"
-    df['掏空指數'] = 0.0
+    for c in ['M分數', '舞弊風險', '掏空指數', '結論']: df[c] = ""
     for i in df.index:
-        r = df.at[i, '營收']
+        r = float(df.at[i, '營收'])
         if r > 0:
             m = -3.2 + (0.15 * (df.at[i, '應收帳款']/r)) + (0.1 * (df.at[i, '存貨']/r))
             df.at[i, 'M分數'] = round(m, 2)
             df.at[i, '舞弊風險'] = "危險" if m > -1.78 else "正常"
-            df.at[i, '掏空指數'] = round((df.at[i, '其他應收款'] + df.at[i, '預付款項']) / r, 3)
+            t_idx = (df.at[i, '其他應收款'] + df.at[i, '預付款項']) / r
+            df.at[i, '掏空指數'] = round(t_idx, 3)
+            df.at[i, '結論'] = "建議抽核" if (m > -1.78 or t_idx > 0.2) else "無明顯異常"
     return df
 
-# 5. UI 與繪圖 (優化軸距，防止點擠在 0)
+# 5. 主介面
 with st.sidebar:
-    st.header("功能中心")
-    mode = st.radio("視角選擇", ["單一深度分析", "多公司PK"])
-    files = st.file_uploader("批次上傳數據 (PDF/Excel)", type=["pdf", "xlsx"], accept_multiple_files=True)
+    st.header("控制台")
+    uploaded_files = st.file_uploader("批次上傳財報", type=["pdf", "xlsx"], accept_multiple_files=True)
+    st.divider()
+    auditor = st.text_input("主辦會計師簽署", "張鈞翔會計師")
 
-if files:
-    main_df = pd.concat([parse_financial_data(f) for f in files if not parse_financial_data(f).empty], ignore_index=True)
-    if not main_df.empty and '年度' in main_df.columns:
-        main_df = main_df[main_df['年度'] > 0].sort_values('年度')
-        main_df = run_forensics(main_df)
+if uploaded_files:
+    all_data = []
+    for f in uploaded_files:
+        data = parse_financial_data(f)
+        if not data.empty: all_data.append(data)
+    
+    if all_data:
+        df_final = pd.concat(all_data, ignore_index=True).sort_values('年度')
+        df_final = run_forensics(df_final)
         
-        target = st.selectbox("選擇公司", main_df['公司名稱'].unique())
-        sub = main_df[main_df['公司名稱'] == target]
+        target = st.selectbox("受查公司切換", df_final['公司名稱'].unique())
+        sub = df_final[df_final['公司名稱'] == target]
         
-        # 繪圖區
+        # 視覺化看板
         c1, c2 = st.columns(2)
         with c1:
-            st.write("Revenue Dynamics (營收趨勢)")
-            fig, ax = plt.subplots(figsize=(5, 3))
-            ax.plot(sub['年度'].astype(str), sub['營營' if '營營' in sub else '營收'], marker='o', linewidth=2)
-            # 自動調整 Y 軸刻度，避免擠在 0
-            if sub['營收'].max() > 0:
-                ax.set_ylim(sub['營收'].min() * 0.9, sub['營收'].max() * 1.1)
-            st.pyplot(fig)
-            
+            st.subheader("Revenue Trend (營收動能)")
+            fig1, ax1 = plt.subplots(figsize=(6, 4))
+            ax1.plot(sub['年度'].astype(str), sub['營收'], marker='o', linewidth=2, color='#268bd2')
+            if sub['營收'].max() > 0: ax1.set_ylim(0, sub['營收'].max() * 1.2)
+            st.pyplot(fig1)
+
         with c2:
-            st.write("Asset Tunelling Observe (掏空觀察)")
-            fig2, ax2 = plt.subplots(figsize=(5, 3))
-            ax2.bar(sub['年度'].astype(str), sub['其他應收款'], label='Other RCV', color='red', alpha=0.6)
-            ax2.bar(sub['年度'].astype(str), sub['預付款項'], bottom=sub['其他應收款'], label='Prepay', color='orange', alpha=0.6)
-            ax2.legend(prop={'size': 7})
+            st.subheader("Asset Risk (資產偏移)")
+            fig2, ax2 = plt.subplots(figsize=(6, 4))
+            ax2.bar(sub['年度'].astype(str), sub['其他應收款'], label='Other RCV', color='#d33682')
+            ax2.bar(sub['年度'].astype(str), sub['預付款項'], bottom=sub['其他應收款'], label='Prepay', color='#b58900')
+            ax2.legend()
             st.pyplot(fig2)
-        
+
         st.write("鑑定數據清單")
         st.dataframe(sub)
+
+        # --- WORD 報告生成按鈕 (確保出現在最下方) ---
+        st.divider()
+        st.subheader("報告產出中心")
+        
+        doc = Document()
+        doc.add_heading(f"玄武鑑識鑑定報告 - {target}", 0)
+        doc.add_paragraph(f"主辦會計師：{auditor}")
+        doc.add_paragraph(f"鑑定結論：{sub.iloc[-1]['結論']}")
+        
+        # 將數據表加入 Word
+        t = doc.add_table(rows=1, cols=4)
+        t.style = 'Table Grid'
+        hdr_cells = t.rows[0].cells
+        hdr_cells[0].text = '年度'
+        hdr_cells[1].text = '營收'
+        hdr_cells[2].text = 'M分數'
+        hdr_cells[3].text = '掏空指數'
+        
+        for _, row in sub.iterrows():
+            row_cells = t.add_row().cells
+            row_cells[0].text = str(row['年度'])
+            row_cells[1].text = str(row['營收'])
+            row_cells[2].text = str(row['M分數'])
+            row_cells[3].text = str(row['掏空指數'])
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        
+        st.download_button(
+            label="生成並下載鑑定報告 (.docx)",
+            data=buf,
+            file_name=f"Forensic_Report_{target}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
     else:
-        st.error("未能解析數值，請確認檔案中的數字格式是否清晰。")
+        st.warning("檔案讀取中或未能抓取有效數值。請確認 PDF 內容是否為可選取文字。")
+else:
+    st.info("系統就緒，請於左側控制台批次上傳受查財報。")
