@@ -114,7 +114,7 @@ with st.sidebar:
     st.text("品牌口號: 玄武鑑定 真偽分明")
     view_mode = st.radio("請選擇分析視角", ["單一公司深度報告", "多公司競爭力與風險PK"])
     st.divider()
-    auditor_sig = st.text_input("主辦會計師", "張鈞翔會計師")
+    auditor_sig = st.text_input("主辦會計師", "會計師")
     uploaded_files = st.file_uploader("上傳財報數據 (PDF/Excel)", type=["pdf", "xlsx"], accept_multiple_files=True)
 
 # 5. 主程式邏輯
