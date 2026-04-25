@@ -113,7 +113,7 @@ with st.sidebar:
     st.header("事務所中心")
     st.text("Slogan: 玄武鑑定，真偽分明")
     mode = st.radio("功能選單", ["單一公司深度鑑定", "多公司競爭力PK"])
-    auditor = st.text_input("主辦會計師", "張鈞翔會計師")
+    auditor = st.text_input("主辦會計師", "會計師")
     files = st.file_uploader("批次上傳資料", type=["pdf", "xlsx"], accept_multiple_files=True)
 
 if files:
