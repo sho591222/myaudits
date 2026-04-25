@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -10,7 +11,7 @@ import os
 import requests
 from datetime import datetime
 
-# --- 1. 環境設定 ---
+# --- 1. 環境與字體設定 ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -34,95 +35,116 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 核心鑑識邏輯 ---
-def forensic_engine(row):
-    r, rc, inv = row.get('營收', 0), row.get('應收帳款', 0), row.get('存貨', 0)
+# --- 2. 核心邏輯模組：鑑定與預測 ---
+def forensic_logic(row):
+    r, rc, inv, ni, ocf = row.get('營收', 0), row.get('應收帳款', 0), row.get('存貨', 0), row.get('淨利', 0), row.get('營業現金流', 0)
     m_score = -3.2 + (0.15 * (rc/r if r>0 else 0)) + (0.1 * (inv/r if r>0 else 0))
-    status = "財報舞弊高風險" if m_score > -1.78 else "經營狀態尚屬穩健"
-    return pd.Series([round(m_score, 2), status])
+    tags = []
+    if m_score > -1.78: tags.append("舞弊高風險")
+    if (rc / r) > 0.45 if r>0 else False: tags.append("掏空警訊")
+    if ocf < ni * 0.15 and ni > 0: tags.append("龐氏吸金預警")
+    return pd.Series([round(m_score, 2), " | ".join(tags) if tags else "經營穩健"])
 
-# --- 3. 介面與多檔案上傳功能 ---
-st.set_page_config(layout="wide", page_title="玄武多檔案鑑識聚合系統")
+def forecast_engine(co_df, future_years=3):
+    """基於移動平均成長率進行預測"""
+    last_val = co_df['營收'].iloc[-1]
+    last_year = co_df['年度'].iloc[-1]
+    growth_rate = co_df['營收'].pct_change().mean()
+    
+    forecast_list = []
+    for i in range(1, future_years + 1):
+        last_val *= (1 + growth_rate)
+        forecast_list.append({
+            '年度': f"{int(last_year) + i}(預測)",
+            '營收': round(last_val, 2),
+            '分析類型': '未來預測'
+        })
+    return pd.DataFrame(forecast_list)
+
+# --- 3. 介面架構 ---
+st.set_page_config(layout="wide", page_title="玄武旗艦鑑識與預測系統")
 
 with st.sidebar:
-    st.header("數據採集設定")
+    st.header("系統參數與數據上傳")
     auditor = st.text_input("主辦會計師", "張鈞翔會計師")
     firm = st.text_input("事務所名稱", "玄武聯合會計師事務所")
-    
     st.divider()
-    # 關鍵功能：多檔案上傳
-    uploaded_files = st.file_uploader(
-        "請上傳多份公司數據底稿 (Excel)", 
-        type=["xlsx"], 
-        accept_multiple_files=True
-    )
+    # 支援多檔案上傳
+    files = st.file_uploader("批次上傳公司數據 (Excel)", type=["xlsx"], accept_multiple_files=True)
 
-# --- 4. 數據聚合處理 ---
-if uploaded_files:
-    all_data_list = []
+# --- 4. 數據聚合與運算 ---
+if files:
+    all_dfs = []
+    for f in files:
+        tmp = pd.read_excel(f)
+        if '公司名稱' not in tmp.columns:
+            tmp['公司名稱'] = f.name.replace(".xlsx", "")
+        all_dfs.append(tmp)
     
-    for f in uploaded_files:
-        try:
-            temp_df = pd.read_excel(f)
-            # 標記來源檔案名稱，方便追蹤數據來自哪間公司
-            if '公司名稱' not in temp_df.columns:
-                temp_df['公司名稱'] = f.name.replace(".xlsx", "")
-            all_data_list.append(temp_df)
-        except Exception as e:
-            st.error(f"檔案 {f.name} 讀取失敗: {e}")
+    df = pd.concat(all_dfs, ignore_index=True)
+    df[['M分數', '鑑定結論']] = df.apply(forensic_logic, axis=1)
+    st.success(f"已聚合 {len(files)} 份檔案。")
 
-    if all_data_list:
-        # 將所有上傳的檔案「合併」成一個 master dataframe
-        df = pd.concat(all_data_list, ignore_index=True)
-        df[['M分數', '鑑定結論']] = df.apply(forensic_engine, axis=1)
+    # --- 5. 多維度功能分析選單 ---
+    mode = st.radio("功能模式選擇", ["單一公司：深度診斷與財務預測", "多間公司：橫向對比與產業分析"])
 
-        st.success(f"成功聚合 {len(uploaded_files)} 份檔案，共計 {len(df)} 筆年度數據。")
+    if mode == "單一公司：深度診斷與財務預測":
+        target = st.selectbox("選擇調查標的", df['公司名稱'].unique())
+        sub_df = df[df['公司名稱'] == target].sort_values('年度')
+        
+        # 顯示歷史趨勢與預測圖表
+        st.subheader(f"{target} 財務趨勢與 3 年預測")
+        f_df = forecast_engine(sub_df)
+        
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(sub_df['年度'].astype(str), sub_df['營收'], marker='o', label='歷史營收')
+        ax.plot(f_df['年度'], f_df['營收'], marker='s', linestyle='--', color='gray', label='模型預測營收')
+        ax.set_title("營收歷史軌跡與未來推估", fontproperties=font_prop)
+        ax.legend(prop=font_prop)
+        st.pyplot(fig)
+        st.dataframe(sub_df)
 
-        # --- 5. 多維度動態分析選單 ---
-        analysis_mode = st.radio(
-            "請選擇分析視角", 
-            ["全體公司橫向評比", "特定公司歷年深度診斷", "同產業對比分析"]
-        )
-
-        if analysis_mode == "全體公司橫向評比":
-            st.subheader("跨公司舞弊風險矩陣")
-            fig1, ax1 = plt.subplots(figsize=(12, 5))
-            df_latest = df.sort_values('年度').groupby('公司名稱').tail(1)
-            ax1.bar(df_latest['公司名稱'], df_latest['M分數'], color='darkred')
-            ax1.axhline(y=-1.78, color='black', linestyle='--')
-            ax1.set_title("各公司最新年度風險指標對比", fontproperties=font_prop)
-            st.pyplot(fig1)
-
-        elif analysis_mode == "特定公司歷年深度診斷":
-            target = st.selectbox("選擇要深入調查的公司", df['公司名稱'].unique())
-            target_df = df[df['公司名稱'] == target].sort_values('年度')
-            st.line_chart(target_df.set_index('年度')[['營收', '應收帳款']])
-            st.write(f"### {target} 鑑定結論：{target_df['鑑定結論'].iloc[-1]}")
-
-        # --- 6. 報告產出與法律聲明 ---
-        st.divider()
-        st.caption("法律聲明：本報告係由多源數據聚合模組自動產出，僅供專業審計參考。")
-
+    else:
+        st.subheader("多公司同產業風險對比")
+        year = st.selectbox("比較年度", sorted(df['年度'].unique(), reverse=True))
+        year_df = df[df['年度'] == year]
+        
         col1, col2 = st.columns(2)
         with col1:
-            output_ex = io.BytesIO()
-            df.to_excel(output_ex, index=False)
-            st.download_button("下載聚合鑑定底稿 (Excel)", output_ex.getvalue(), "聚合底稿.xlsx")
-        
+            fig2, ax2 = plt.subplots()
+            ax2.bar(year_df['公司名稱'], year_df['M分數'], color='orange')
+            ax2.axhline(y=-1.78, color='red', linestyle='--')
+            ax2.set_title(f"{year} 年度各公司舞弊風險評比", fontproperties=font_prop)
+            st.pyplot(fig2)
         with col2:
-            if st.button("產生綜合鑑定 Word 報告"):
-                doc = Document()
-                doc.add_heading("多源數據鑑識聚合鑑定報告", 0).alignment = WD_ALIGN_PARAGRAPH.CENTER
-                doc.add_paragraph(f"主辦會計師：{auditor}\n事務所：{firm}")
-                
-                doc.add_heading("一、 重大風險警告名單", level=1)
-                risk_df = df[df['鑑定結論'] != "經營狀態尚屬穩健"]
-                for _, r in risk_df.iterrows():
-                    doc.add_paragraph(f"標的：{r['公司名稱']} ({r['年度']}年) - 結論：{r['鑑定結論']}")
+            st.write("### 異常標的警告名單")
+            st.dataframe(year_df[year_df['M分數'] > -1.78][['公司名稱', 'M分數', '鑑定結論']])
 
-                buf = io.BytesIO()
-                doc.save(buf)
-                st.download_button("點此下載 Word 報告", buf.getvalue(), "綜合鑑定報告.docx")
+    # --- 6. 報告匯出與法律聲明 ---
+    st.divider()
+    st.caption("法律聲明：本鑑定報告與財務預測內容僅供專業查核參考，不具備最終司法判決效力。")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        out_ex = io.BytesIO()
+        df.to_excel(out_ex, index=False)
+        st.download_button("匯出聚合鑑定底稿 (Excel)", out_ex.getvalue(), "聚合底稿.xlsx")
+    with c2:
+        if st.button("產生綜合鑑定意見書 (Word)"):
+            doc = Document()
+            doc.add_heading("鑑識會計鑑定與預測報告", 0).alignment = WD_ALIGN_PARAGRAPH.CENTER
+            doc.add_paragraph(f"事務所：{firm}\n會計師：{auditor}")
+            doc.add_heading("一、 重大舞弊風險發現", level=1)
+            for _, r in df[df['M分數'] > -1.78].iterrows():
+                doc.add_paragraph(f"{r['公司名稱']} ({r['年度']})：{r['鑑定結論']}")
+            
+            doc.add_heading("二、 未來營運成長預測", level=1)
+            doc.add_paragraph("本報告內建之預測模型已針對個別標的進行趨勢分析，詳見附件底稿。")
+            
+            doc.add_paragraph("\n\n會計師簽署：____________________")
+            buf_wd = io.BytesIO()
+            doc.save(buf_word := buf_wd)
+            st.download_button("下載綜合報告 (Word)", buf_word.getvalue(), "鑑定報告.docx")
 
 else:
-    st.info("系統就緒。請上傳一個或多個 Excel 檔案以開始聚合分析。")
+    st.info("系統就緒。請上傳一個或多個 Excel 檔案以啟動多維度分析。")
