@@ -43,7 +43,7 @@ with st.sidebar:
     
     st.header("鑑定參數設定")
     co_name = st.text_input("受調查公司全銜", "示例股份有限公司")
-    auditor_name = st.text_input("簽證會計師", "張鈞翔會計師")
+    auditor_name = st.text_input("簽證會計師", "張鈞翔")
     firm_name = st.text_input("事務所名稱", "玄武聯合會計師事務所")
     
     st.divider()
