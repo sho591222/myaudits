@@ -97,13 +97,13 @@ st.set_page_config(layout="wide", page_title="玄武鑑識中心")
 # 自定義 Logo 標題區
 st.markdown("""
     <div style='background-color:#002b36; padding:20px; border-radius:10px; border-left: 10px solid #b58900;'>
-        <h1 style='color:white; margin:0;'>🛡️ 玄武快機師事務所</h1>
+        <h1 style='color:white; margin:0;'>  玄武快機師事務所</h1>
         <p style='color:#839496; margin:0;'>AI 財務鑑識與成長預測旗艦系統</p>
     </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("🏢 事務所中心")
+    st.header("  事務所中心")
     st.info("Slogan: 玄武鑑定，真偽分明")
     mode = st.radio("功能選單", ["單一公司深度鑑定", "多公司競爭力PK"])
     auditor = st.text_input("主辦會計師", "張鈞翔會計師")
