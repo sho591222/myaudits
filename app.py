@@ -63,25 +63,25 @@ def forensic_comprehensive_engine(i, r, rc, c, a):
 
     # A. 財報舞弊/不實偵測
     if m_score > -1.78:
-        status_tags.append("⚠️ 財報舞弊/不實表達")
+        status_tags.append(" 財報舞弊/不實表達")
         essay_narrative += f"\n【舞弊分析】：M-Score 指標 ({round(m_score,2)}) 已衝破警戒線。其營收與應收帳款之關聯性存在重大異常，極大機率係透過「虛構收入」來美化報表，資產負債表之債權真實性存疑。"
         audit_sugg.append("執行分錄檢測（JET），針對結帳日前後之異常分錄執行實質性測試。")
 
     # B. 資產掏空偵測
     if (rc / r) > 0.48:
-        status_tags.append("🚨 資產掏空風險")
+        status_tags.append(" 資產掏空風險")
         essay_narrative += f"\n【掏空分析】：應收帳款佔營收比例過高 ({round((rc/r)*100,1)}%)。疑似透過「未揭露之關係人交易」將實質資金撥貸至外部，導致公司資產虛擬化，資金外流風險極高。"
         audit_sugg.append("詳查關係人往來明細，執行穿透式查核以確認資金最終流向。")
 
     # C. 龐氏騙局 (吸金) 偵測
     if cash_flow_ratio < 0.15 and r > 7500:
-        status_tags.append("💰 龐氏吸金預警")
+        status_tags.append(" 龐氏吸金預警")
         essay_narrative += f"\n【吸金鑑定】：偵測到典型龐氏騙局特徵：利潤與現金流嚴重背離。帳面雖有高額盈餘，但實質營業現金流入枯竭，懷疑係以新進投資者本金支應舊有投資者收益，而非源自真實營運。"
         audit_sugg.append("溯源投資者資金流向，確認收益分派之合法性來源。")
 
     # D. 洗錢風險偵測
     if laundry_index > 0.3:
-        status_tags.append("🧨 異常洗錢風險")
+        status_tags.append(" 異常洗錢風險")
         essay_narrative += f"\n【洗錢鑑定】：資產負債表中「其他應收款」等過渡科目異常暴增。此為典型洗錢路徑，透過頻繁且巨額的非本業資金進出以掩蓋髒錢流向，資金黑箱風險極大。"
         audit_sugg.append("詳查重大其他應收款對象背景，偵測是否存在非法撥貸或虛假退款之洗錢態樣。")
 
