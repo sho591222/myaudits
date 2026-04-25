@@ -63,12 +63,12 @@ def forensic_analysis(df):
 # 4. 側邊欄控制與功能選擇
 with st.sidebar:
     st.header("⚙️ 鑑識中心控制台")
-    mode = st.radio("功能選擇", [" 單一公司：多年深度比較", "⚔️ 多家公司：同年度橫向 PK"])
+    mode = st.radio("功能選擇", [" 單一公司：多年深度比較", " 多家公司：同年度橫向 PK"])
     st.divider()
     f_method = st.selectbox("財務預測模型", ["線性成長 (5%)", "歷史平均成長", "保守估計 (0%)"])
     st.divider()
     uploaded_files = st.file_uploader("上傳財報資料", type=["pdf", "xlsx"], accept_multiple_files=True)
-    auditor = st.text_input("簽署主辦會計師", "張鈞翔會計師")
+    auditor = st.text_input("簽署主辦會計師", "會計師")
 
 # 5. 主程式：深度比較與 PK 邏輯
 if uploaded_files:
