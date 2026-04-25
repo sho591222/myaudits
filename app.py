@@ -57,7 +57,7 @@ def batch_parse(file):
 with st.sidebar:
     st.header("⚡ 鑑識控制台")
     uploaded_files = st.file_uploader("批次上傳多個 PDF", type=["pdf"], accept_multiple_files=True)
-    auditor = st.text_input("簽署會計師", "張鈞翔會計師")
+    auditor = st.text_input("簽署會計師", "會計師")
 
 # --- 4. 主程式：非法看板 ---
 if uploaded_files:
