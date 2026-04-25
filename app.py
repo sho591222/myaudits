@@ -10,7 +10,7 @@ import requests
 from datetime import datetime
 import pdfplumber
 
-# --- 1. 字體設定 ---
+# --- 1. 字體系統重整 ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -18,8 +18,13 @@ def load_chinese_font():
     if not os.path.exists(font_path):
         try:
             response = requests.get(font_url)
-            with open(font_path, "wb") as f: f.write(response.content)
-        except: return None
+            if response.status_code == 200:
+                with open(font_path, "wb") as f:
+                    f.write(response.content)
+            else:
+                return None
+        except:
+            return None
     return font_path
 
 font_p = load_chinese_font()
@@ -33,7 +38,7 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 數據採集 ---
+# --- 2. 數據採集引擎 ---
 def parse_pdf_robustly(file):
     try:
         raw_tables = []
@@ -53,9 +58,11 @@ def parse_pdf_robustly(file):
             row_str = "".join([str(x) for x in row.values if x])
             for val in row.values:
                 val_s = str(val).strip()
-                if val_s.isdigit() and 1900 <= int(val_s) <= 2100: res["年度"] = int(val_s)
+                if val_s.isdigit() and 1900 <= int(val_s) <= 2100:
+                    res["年度"] = int(val_s)
             
             def extract_num(r):
+                # 處理括號負數與千分位
                 nums = [pd.to_numeric(str(x).replace(",","").replace("(","-").replace(")",""), errors='coerce') for x in r.values if x]
                 nums = [n for n in nums if not np.isnan(n)]
                 return nums[0] if nums else 0
@@ -66,42 +73,52 @@ def parse_pdf_robustly(file):
             if any(k in row_str for k in ["現金", "約當現金"]): res["現金"] = extract_num(row)
             if any(k in row_str for k in ["負債總額", "負債合計"]): res["負債總額"] = extract_num(row)
         return pd.DataFrame([res])
-    except: return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
-# --- 3. 預測與鑑定核心 (修正回傳長度) ---
+# --- 3. 鑑識核心 (嚴格限制回傳結構) ---
 def forensic_analyze(row):
-    r = row.get('營收', 0)
-    rc = row.get('應收帳款', 0)
-    inv = row.get('存貨', 0)
-    cash = row.get('現金', 0)
-    debt = row.get('負債總額', 0)
+    # 初始化回傳 Series，確保長度永遠為 4
+    results = pd.Series([0.0, "數據不足", "正常", "正常"], index=['M分數', '舞弊狀態', '掏空風險', '吸金指標'])
     
-    # 確保無論如何都回傳 4 個值
-    if r <= 0: 
-        return pd.Series([0.0, "數據不足", "正常", "正常"])
-    
-    m_score = -3.2 + (0.15 * (rc/r)) + (0.1 * (inv/r))
-    t_risk = "高風險" if (rc/r) > 0.4 else "正常"
-    p_risk = "警示" if cash > 0 and (debt/cash) > 5 else "正常"
-    
-    return pd.Series([round(m_score, 2), "危險" if m_score > -1.78 else "正常", t_risk, p_risk])
+    try:
+        r = float(row.get('營收', 0))
+        rc = float(row.get('應收帳款', 0))
+        inv = float(row.get('存貨', 0))
+        cash = float(row.get('現金', 0))
+        debt = float(row.get('負債總額', 0))
+        
+        if r <= 0: return results
+        
+        m_score = -3.2 + (0.15 * (rc/r)) + (0.1 * (inv/r))
+        results['M分數'] = round(m_score, 2)
+        results['舞弊狀態'] = "危險" if m_score > -1.78 else "正常"
+        results['掏空風險'] = "高風險" if (rc/r) > 0.4 else "正常"
+        results['吸金指標'] = "警示" if cash > 0 and (debt/cash) > 5 else "正常"
+    except:
+        pass
+        
+    return results
 
 def get_forecast(df, years=2):
     if len(df) < 2: return pd.DataFrame()
-    df = df.sort_values('年度')
-    avg_growth = df['營收'].pct_change().mean()
-    if np.isnan(avg_growth): avg_growth = 0
-    last_year = int(df['年度'].iloc[-1])
-    last_rev = df['營收'].iloc[-1]
-    f_results = []
+    df_sorted = df.sort_values('年度')
+    avg_growth = df_sorted['營收'].pct_change().mean()
+    if np.isnan(avg_growth) or np.isinf(avg_growth): avg_growth = 0
+    
+    last_year = int(df_sorted['年度'].iloc[-1])
+    last_rev = float(df_sorted['營收'].iloc[-1])
+    
+    f_list = []
     for i in range(1, years + 1):
         last_rev *= (1 + avg_growth)
-        f_results.append({'年度': last_year + i, '營收': round(last_rev, 2), '類型': '預測'})
-    return pd.DataFrame(f_results)
+        f_list.append({'年度': last_year + i, '營營' if '營營' in df else '營收': round(last_rev, 2), '類型': '預測'})
+    return pd.DataFrame(f_list)
 
-# --- 4. 介面 ---
+# --- 4. 使用者介面 ---
 st.set_page_config(layout="wide", page_title="玄武鑑識中心")
 
+# 移除表情符號的標題
 st.markdown("""
     <div style='background-color:#002b36; padding:20px; border-radius:10px; border-left: 10px solid #b58900;'>
         <h1 style='color:white; margin:0;'>玄武快機師事務所</h1>
@@ -110,89 +127,107 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("事務所中心")
-    st.text("Slogan: 玄武鑑定，真偽分明")
-    mode = st.radio("功能選單", ["單一公司深度鑑定", "多公司競爭力PK"])
-    auditor = st.text_input("主辦會計師", "會計師")
-    files = st.file_uploader("批次上傳資料", type=["pdf", "xlsx"], accept_multiple_files=True)
+    st.header("事務所控制台")
+    st.text("品牌口號: 玄武鑑定，真偽分明")
+    mode = st.radio("模式切換", ["單一標的深度分析", "多標的風險對比"])
+    auditor_name = st.text_input("主辦會計師簽署", "張鈞翔會計師")
+    st.divider()
+    uploaded_files = st.file_uploader("批次上傳數據檔案", type=["pdf", "xlsx"], accept_multiple_files=True)
 
-if files:
-    all_dfs = []
-    for f in files:
+if uploaded_files:
+    data_frames = []
+    for f in uploaded_files:
         if f.name.endswith('.xlsx'):
-            all_dfs.append(pd.read_excel(f))
+            data_frames.append(pd.read_excel(f))
         else:
-            all_dfs.append(parse_pdf_robustly(f))
+            data_frames.append(parse_pdf_robustly(f))
     
-    if all_dfs:
-        df = pd.concat(all_dfs, ignore_index=True)
-        # 排除年度為 0 的資料
-        df = df[df['年度'] > 0].copy()
+    if data_frames:
+        main_df = pd.concat(data_frames, ignore_index=True)
+        main_df = main_df[main_df['年度'] > 0].drop_duplicates(subset=['公司名稱', '年度']).sort_values('年度').copy()
         
-        if not df.empty:
-            df = df.drop_duplicates(subset=['公司名稱', '年度']).sort_values('年度')
-            # 關鍵修正點：確保 apply 產出的 Series 長度永遠與欄位清單一致
-            analysis_res = df.apply(forensic_analyze, axis=1)
-            df[['M分數', '舞弊狀態', '掏空風險', '吸金指標']] = analysis_res
+        if not main_df.empty:
+            # 修正後的 apply 調用
+            analysis_data = main_df.apply(forensic_analyze, axis=1)
+            main_df[['M分數', '舞弊狀態', '掏空風險', '吸金指標']] = analysis_data
 
-            if mode == "單一公司深度鑑定":
-                target = st.selectbox("選擇受查對象", df['公司名稱'].unique())
-                sub = df[df['公司名稱'] == target]
+            if mode == "單一標的深度分析":
+                target_company = st.selectbox("選擇受查公司", main_df['公司名稱'].unique())
+                sub_df = main_df[main_df['公司名稱'] == target_company]
                 
-                st.subheader("營收歷史軌跡與成長預估")
-                f_df = get_forecast(sub)
+                st.subheader("營收歷史軌跡與成長預估趨勢圖")
+                forecast_df = get_forecast(sub_df)
+                
                 fig, ax = plt.subplots(figsize=(12, 5))
-                ax.plot(sub['年度'].astype(str), sub['營收'], marker='o', label='歷史實際營收', linewidth=3, color='#268bd2')
-                if not f_df.empty:
-                    ax.plot(f_df['年度'].astype(str), f_df['營收'], '--', marker='s', label='AI 成長預測', color='#cb4b16')
-                ax.set_title(f"{target} 財務動能分析", fontproperties=font_prop)
+                ax.plot(sub_df['年度'].astype(str), sub_df['營收'], marker='o', label='歷史實際值', linewidth=3, color='#268bd2')
+                if not forecast_df.empty:
+                    ax.plot(forecast_df['年度'].astype(str), forecast_df['營收'], '--', marker='s', label='AI 預測值', color='#cb4b16')
+                
+                ax.set_title(f"{target_company} 財務動能與預測圖表", fontproperties=font_prop)
                 ax.legend(prop=font_prop)
                 st.pyplot(fig)
                 
-                c1, c2, c3 = st.columns(3)
-                latest = sub.iloc[-1]
-                c1.metric("舞弊指標 (M-Score)", latest['M分數'], latest['舞弊狀態'], delta_color="inverse")
-                c2.metric("資產掏空風險", latest['掏空風險'])
-                c3.metric("非法吸金警示", latest['吸金指標'])
-                st.dataframe(sub)
+                # 指標看板
+                stat_cols = st.columns(3)
+                latest_data = sub_df.iloc[-1]
+                stat_cols[0].metric("舞弊指標 (M-Score)", latest_data['M分數'], latest_data['舞弊狀態'], delta_color="inverse")
+                stat_cols[1].metric("資產掏空風險", latest_data['掏空風險'])
+                stat_cols[2].metric("非法吸金警示", latest_data['吸金指標'])
+                
+                st.write("詳細數據列表")
+                st.dataframe(sub_df)
 
-            elif mode == "多公司競爭力PK":
-                st.subheader("產業風險與成長 PK")
-                col1, col2 = st.columns(2)
-                with col1:
+            elif mode == "多標的風險對比":
+                st.subheader("跨公司風險與成長 PK 視覺化")
+                comp_cols = st.columns(2)
+                with comp_cols[0]:
                     fig2, ax2 = plt.subplots()
-                    ax2.bar(df['公司名稱'], df['M分數'], color='#2aa198')
-                    ax2.axhline(y=-1.78, color='red', linestyle='--', label='警戒線')
-                    ax2.set_title("跨公司舞弊指標評比", fontproperties=font_prop)
+                    ax2.bar(main_df['公司名稱'], main_df['M分數'], color='#2aa198')
+                    ax2.axhline(y=-1.78, color='red', linestyle='--', label='舞弊警戒線')
+                    ax2.set_title("各標的舞弊風險評比", fontproperties=font_prop)
                     st.pyplot(fig2)
-                with col2:
+                with comp_cols[1]:
                     fig3, ax3 = plt.subplots()
-                    for co in df['公司名稱'].unique():
-                        co_d = df[df['公司名稱'] == co]
-                        f_co = get_forecast(co_d)
-                        full_view = pd.concat([co_d[['年度','營收']], f_co[['年度','營收']]])
-                        ax3.plot(full_view['年度'].astype(str), full_view['營營' if '營營' in full_view else '營收'], label=co, marker='.')
-                    ax3.set_title("成長動能對比線", fontproperties=font_prop)
+                    for company in main_df['公司名稱'].unique():
+                        c_data = main_df[main_df['公司名稱'] == company]
+                        f_data = get_forecast(c_data)
+                        combined = pd.concat([c_data[['年度','營收']], f_data[['年度','營收']]])
+                        ax3.plot(combined['年度'].astype(str), combined['營收'], label=company, marker='.')
+                    ax3.set_title("產業成長動能 PK 線", fontproperties=font_prop)
                     ax3.legend(prop=font_prop)
                     st.pyplot(fig3)
 
-            if st.button("匯出正式鑑定報告"):
-                doc = Document()
-                doc.add_heading("玄武會計師事務所 - 財務鑑定報告書", 0)
-                doc.add_paragraph(f"主辦會計師：{auditor}")
+            # 報告匯出
+            if st.button("點此產出正式鑑定報告檔案"):
+                report = Document()
+                report.add_heading("玄武會計師事務所 財務鑑定報告書", 0)
+                report.add_paragraph(f"主辦會計師：{auditor_name}")
+                report.add_paragraph(f"產出日期：{datetime.now().strftime('%Y-%m-%d')}")
 
-                doc.add_heading("一、 營運成長與未來預測敘述", level=1)
-                for co in df['公司名稱'].unique():
-                    co_sub = df[df['公司名稱'] == co]
-                    if len(co_sub) >= 2:
-                        growth = co_sub['營收'].pct_change().mean()
-                        f_data = get_forecast(co_sub)
-                        doc.add_paragraph(f"受查對象 {co} 平均年增率為 {growth:.2%}。未來營收預計可達 {f_data['營收'].iloc[0]:,.0f} 元。")
-                
-                buf = io.BytesIO()
-                doc.save(buf)
-                st.download_button("下載報告檔案", buf.getvalue(), "鑑定報告.docx")
+                report.add_heading("一、 營運成長與未來預測深度敘述", level=1)
+                for company in main_df['公司名稱'].unique():
+                    c_sub = main_df[main_df['公司名稱'] == company]
+                    if len(c_sub) >= 2:
+                        g_rate = c_sub['營收'].pct_change().mean()
+                        f_info = get_forecast(c_sub)
+                        desc = (f"受查對象 {company} 之歷史平均年成長率為 {g_rate:.2%}。 "
+                                f"經 AI 模組推估，未來一期之營收目標預計可達 {f_info['營收'].iloc[0]:,.0f} 元。")
+                        report.add_paragraph(desc)
+
+                report.add_heading("二、 財務犯罪防制鑑定結論", level=1)
+                abnormal = main_df[main_df['舞弊狀態'] == "危險"]
+                if abnormal.empty:
+                    report.add_paragraph("經查核，目前所有受查對象之各項財務指標均在正常範圍內。")
+                else:
+                    for _, row in abnormal.iterrows():
+                        p = report.add_paragraph(f"異常標的：{row['公司名稱']} ({row['年度']}年度)")
+                        p.add_run(f"\n舞弊鑑定結論：M-Score 為 {row['M分數']}，屬危險級別。").bold = True
+                        p.add_run(f"\n其他風險：掏空評級為 {row['掏空風險']}，吸金警示為 {row['吸金指標']}。")
+
+                stream = io.BytesIO()
+                report.save(stream)
+                st.download_button("下載 Word 報告", stream.getvalue(), "玄武鑑定報告.docx")
         else:
-            st.warning("未能從上傳檔案中提取到有效的年度數據。")
+            st.warning("檔案解析成功但未發現有效數據。")
 else:
-    st.info("系統就緒。請上傳兩年份以上的財報檔案以啟動分析。")
+    st.info("系統就緒。請上傳至少兩年份財報以執行自動化鑑定。")
