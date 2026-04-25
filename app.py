@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Inches
 import io
 import matplotlib.font_manager as fm
 import os
@@ -11,7 +10,7 @@ import requests
 from datetime import datetime
 import pdfplumber
 
-# --- 1. 環境設定 ---
+# --- 1. 字體與環境設定 (解決中文字體亂碼) ---
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -35,7 +34,7 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 智慧 PDF 採集引擎 ---
+# --- 2. 數據採集引擎 (PDF/Excel) ---
 def parse_pdf_robustly(file):
     try:
         raw_tables = []
@@ -48,7 +47,7 @@ def parse_pdf_robustly(file):
                     raw_tables.append(df_tmp)
         if not raw_tables: return pd.DataFrame()
         master_df = pd.concat(raw_tables, ignore_index=True)
-        res = {"公司名稱": file.name.replace(".pdf", ""), "年度": 0, "營收": 0, "應收帳款": 0, "存貨": 0, "現金": 0, "負債": 0}
+        res = {"公司名稱": file.name.replace(".pdf", ""), "年度": 0, "營收": 0, "應收帳款": 0, "存貨": 0, "現金": 0, "負債總額": 0}
         for _, row in master_df.iterrows():
             row_str = "".join([str(x) for x in row.values])
             if any(k in row_str for k in ["年度", "Year"]):
@@ -61,98 +60,132 @@ def parse_pdf_robustly(file):
             if "應收帳款" in row_str: res["應收帳款"] = get_num(row)
             if "存貨" in row_str: res["存貨"] = get_num(row)
             if any(k in row_str for k in ["現金", "約當現金"]): res["現金"] = get_num(row)
-            if "負債" in row_str: res["負債"] = get_num(row)
+            if any(k in row_str for k in ["負債總額", "負債合計"]): res["負債總額"] = get_num(row)
         return pd.DataFrame([res])
     except: return pd.DataFrame()
 
-# --- 3. 四大犯罪偵測核心模型 ---
+# --- 3. 四大犯罪鑑定模型 & 預測模型 ---
 def crime_detector(row):
-    r, rc, inv, cash, debt = row.get('營收', 0), row.get('應收帳款', 0), row.get('存貨', 0), row.get('現金', 0), row.get('負債', 0)
-    results = {}
-    
-    # (1) 財報舞弊模型 (Beneish M-Score)
+    r, rc, inv, cash, debt = row.get('營收', 0), row.get('應收帳款', 0), row.get('存貨', 0), row.get('現金', 0), row.get('負債總額', 0)
+    # A. 舞弊 (M-Score)
     m_score = -3.2 + (0.15 * (rc/r if r>0 else 0)) + (0.1 * (inv/r if r>0 else 0))
-    results['舞弊指數'] = round(m_score, 2)
-    
-    # (2) 資產掏空模型 (Tunelling: 應收帳款異常佔比)
-    t_index = (rc / r) if r > 0 else 0
-    results['掏空風險'] = "高" if t_index > 0.4 else "低"
-    
-    # (3) 非法吸金模型 (Ponzi: 負債成長率 vs 現金水位)
-    results['吸金指標'] = "警示" if debt > cash * 5 and r < cash else "正常"
-    
-    # (4) 洗錢風險模型 (Money Laundering: 營收現金不匹配)
-    results['洗錢風險'] = "中高" if r > 0 and cash / r < 0.05 else "低"
-    
-    return pd.Series([results['舞弊指數'], results['掏空風險'], results['吸金指標'], results['洗錢風險']])
+    # B. 掏空 (應收帳款佔比)
+    t_ratio = (rc / r) if r > 0 else 0
+    # C. 吸金 (負債現金比)
+    p_index = (debt / cash) if cash > 0 else 0
+    # D. 洗錢 (現金營收比)
+    ml_index = (cash / r) if r > 0 else 0
+    return pd.Series([
+        round(m_score, 2),
+        "危險" if m_score > -1.78 else "正常",
+        "高風險" if t_ratio > 0.4 else "正常",
+        "警示" if p_index > 5 else "正常",
+        "高機率" if ml_index < 0.05 and r > 0 else "低"
+    ])
 
-# --- 4. 側邊欄配置 ---
-st.set_page_config(layout="wide", page_title="玄武犯罪防制鑑定平台")
+def get_forecast_df(df, years=3):
+    """營收線性成長預測"""
+    if len(df) < 2: return pd.DataFrame()
+    df = df.sort_values('年度')
+    growth = df['營收'].pct_change().mean()
+    curr_rev, last_year = df['營收'].iloc[-1], df['年度'].iloc[-1]
+    f_list = []
+    for i in range(1, years + 1):
+        curr_rev *= (1 + (growth if not np.isnan(growth) else 0))
+        f_list.append({'年度': int(last_year)+i, '營收': round(curr_rev, 2), '類型': 'AI預測'})
+    return pd.DataFrame(f_list)
+
+# --- 4. Streamlit 介面配置 ---
+st.set_page_config(layout="wide", page_title="玄武鑑識預測旗艦平台")
+
 with st.sidebar:
-    st.header("鑑識官中心")
-    mode = st.radio("功能選單", ["綜合分析：趨勢與預測", "四大犯罪防制偵測中心"])
+    st.header("🕵️ 鑑識官控制台")
+    analysis_mode = st.radio("功能切換", ["單一公司：鑑定與預測", "多公司對比：同業競爭與風險"])
     st.divider()
-    files = st.file_uploader("上傳 Excel 或 PDF", type=["xlsx", "pdf"], accept_multiple_files=True)
+    files = st.file_uploader("上傳 Excel 或 PDF 財報數據", type=["xlsx", "pdf"], accept_multiple_files=True)
 
-# --- 5. 主流程 ---
 if files:
+    # 數據處理與清洗
     data_list = [pd.read_excel(f) if f.name.endswith('.xlsx') else parse_pdf_robustly(f) for f in files]
     df = pd.concat(data_list, ignore_index=True).fillna(0)
     df['年度'] = pd.to_numeric(df['年度'], errors='coerce').fillna(0).astype(int)
     df = df.drop_duplicates(subset=['公司名稱', '年度'], keep='last')
     
-    # 執行犯罪偵測
-    df[['舞弊指數', '掏空風險', '吸金指標', '洗錢風險']] = df.apply(crime_detector, axis=1)
+    # 核心鑑識計算
+    df[['舞弊指標', '舞弊判定', '掏空風險', '吸金指標', '洗錢風險']] = df.apply(crime_detector, axis=1)
 
-    if mode == "四大犯罪防制偵測中心":
-        st.title("🛡️ 財務犯罪防制偵測中心")
-        target = st.selectbox("選擇受查對象", df['公司名稱'].unique())
+    # --- 選項 A: 單一公司深度分析 ---
+    if analysis_mode == "單一公司：鑑定與預測":
+        target = st.selectbox("選擇調查公司", df['公司名稱'].unique())
         sub = df[df['公司名稱'] == target].sort_values('年度')
         
-        # 多年/單年切換顯示
-        view_type = st.segmented_control("顯示維度", ["多年趨勢掃描", "特定單年深度鑑定"], default="多年趨勢掃描")
+        st.title(f"🔍 {target} 深度鑑定報告")
         
-        if view_type == "多年趨勢掃描":
-            st.subheader(f"{target} - 犯罪風險指標走勢")
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(sub['年度'].astype(str), sub['舞弊指數'], label='舞弊指數(M-Score)', marker='D', color='red')
-            ax.axhline(y=-1.78, color='black', linestyle='--', label='舞弊警戒線')
-            ax.set_ylabel("指標分數")
-            ax.legend(prop=font_prop)
-            st.pyplot(fig)
-            
-            # 四大指標摘要表
-            st.table(sub[['年度', '舞弊指數', '掏空風險', '吸金指標', '洗錢風險']])
-            
-        else: # 單年深度鑑定
-            sel_year = st.selectbox("選擇鑑定年份", sub['年度'].unique())
-            year_data = sub[sub['年度'] == sel_year].iloc[0]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("舞弊指數", year_data['舞弊指數'], delta="危險" if year_data['舞弊指數'] > -1.78 else "正常", delta_color="inverse")
-            col2.metric("掏空風險", year_data['掏空風險'])
-            col3.metric("吸金警示", year_data['吸金指標'])
-            col4.metric("洗錢機率", year_data['洗錢風險'])
-            
-            # 雷達圖呈現 (簡化版)
-            st.info(f"鑑定報告：{target} 在 {sel_year} 年度之核心指標檢測結果如上。")
+        # 1. 營收趨勢與預測圖表
+        st.subheader("營收歷史軌跡與成長預估")
+        f_df = get_forecast_df(sub)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(sub['年度'], sub['營收'], marker='o', label='歷史營收', linewidth=2)
+        if not f_df.empty:
+            ax.plot(f_df['年度'], f_df['營收'], '--', marker='s', color='orange', label='預測趨勢')
+        ax.set_title("營收趨勢圖", fontproperties=font_prop)
+        ax.legend(prop=font_prop)
+        st.pyplot(fig)
+        
+        # 2. 四大犯罪指標儀表板
+        st.subheader("四大犯罪防制偵測指標")
+        cols = st.columns(4)
+        latest = sub.iloc[-1]
+        cols[0].metric("舞弊指數", latest['舞弊指標'], latest['舞弊判定'], delta_color="inverse")
+        cols[1].metric("掏空風險", latest['掏空風險'])
+        cols[2].metric("吸金警示", latest['吸金指標'])
+        cols[3].metric("洗錢機率", latest['洗錢風險'])
+        
+        st.dataframe(sub[['年度', '營收', '舞弊指標', '掏空風險', '吸金指標', '洗錢風險']])
 
-    else: # 原始預測模式
-        # ... (保留原有的趨勢預測代碼) ...
-        st.write("請切換至「四大犯罪防制偵測中心」查看詳情")
+    # --- 選項 B: 多公司橫向對比 ---
+    elif analysis_mode == "多公司對比：同業競爭與風險":
+        st.title("📊 同業風險與預測對比中心")
+        
+        col_charts = st.columns(2)
+        with col_charts[0]:
+            st.subheader("產業舞弊風險分佈 (M-Score)")
+            fig2, ax2 = plt.subplots()
+            ax2.bar(df['公司名稱'], df['舞弊指標'], color='teal')
+            ax2.axhline(y=-1.78, color='red', linestyle='--', label='警戒線')
+            ax2.set_ylabel("指標分數")
+            ax2.legend(prop=font_prop)
+            st.pyplot(fig2)
+            
+        with col_charts[1]:
+            st.subheader("多公司成長動能預測")
+            fig3, ax3 = plt.subplots()
+            for co in df['公司名稱'].unique():
+                co_sub = df[df['公司名稱'] == co].sort_values('年度')
+                co_f = get_forecast_df(co_sub, years=2)
+                # 結合歷史與預測畫圖
+                full_view = pd.concat([co_sub[['年度','營收']], co_f[['年度','營收']]])
+                ax3.plot(full_view['年度'], full_view['營營' if '營營' in full_view else '營收'], label=co, marker='.')
+            ax3.legend(prop=font_prop)
+            st.pyplot(fig3)
+            
+        st.dataframe(df[['公司名稱', '年度', '舞弊指標', '舞弊判定', '掏空風險', '吸金指標', '洗錢風險']])
 
-    # 報告下載
+    # --- 7. 報告導出 ---
     st.divider()
-    if st.button("下載全方位犯罪防制報告 (Word)"):
+    if st.button("下載旗艦鑑定報告 (Word)"):
         doc = Document()
-        doc.add_heading("財務犯罪防制鑑定報告", 0)
+        doc.add_heading("鑑識會計與財務預測鑑定報告", 0)
+        doc.add_paragraph(f"主辦會計師：{st.sidebar.text_input('會計師簽署', '張鈞翔會計師')}")
         doc.add_paragraph(f"產出日期：{datetime.now().strftime('%Y/%m/%d')}")
-        for _, r in df.iterrows():
-            if r['舞弊指數'] > -1.78 or r['掏空風險'] == "高":
-                doc.add_paragraph(f"⚠️ 異常標的：{r['公司名稱']} ({r['年度']})")
-                doc.add_paragraph(f" - 舞弊指標：{r['舞弊指數']} | 掏空風險：{r['掏空風險']}")
+        
+        doc.add_heading("一、 重大異常摘要", level=1)
+        for _, r in df[df['舞弊判定'] == "危險"].iterrows():
+            doc.add_paragraph(f"⚠️ 公司：{r['公司名稱']} ({r['年度']}) - 舞弊指標異常")
+            
         buf = io.BytesIO()
         doc.save(buf)
-        st.download_button("下載報告", buf.getvalue(), "犯罪鑑定報告.docx")
+        st.download_button("點此匯出專業 Word 報告", buf.getvalue(), "鑑識預測報告.docx")
+
 else:
-    st.info("請上傳資料以啟動偵測中心。")
+    st.info("系統就緒。請從左側上傳數據開始鑑定。")
