@@ -106,37 +106,71 @@ if uploaded_files:
             
             st.dataframe(sub)
 
-            # --- 6. 生成 Word 報告 (圖表嵌入強化版) ---
-            st.divider()
-            if st.button("🚀 生成「圖文詳盡版」鑑定鑑定報告"):
-                doc = Document()
-                title = doc.add_heading('財務鑑識鑑定意見書', 0)
-                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                doc.add_heading(f'受查單位：{target}', level=1)
-                
-                # 第壹章：舞弊偵測
-                doc.add_heading('壹、 財務舞弊與盈餘操縱偵測', level=1)
-                doc.add_paragraph(f"本鑑定採用 Beneish M-Score 模型。該公司最新年度 M 分數為 {sub.iloc[-1]['M分數']}，財報不實預警為：{sub.iloc[-1]['不實預警']}。重點在於分析應收帳款與存貨是否非正常成長。")
-
-                # 第貳章：資產掏空 (關鍵圖表嵌入)
-                doc.add_heading('貳、 資產掏空與異常資金偏移', level=1)
-                doc.add_paragraph("以下為該公司歷年營收、應收帳款與其他應收款之趨勢對比圖。若觀察到營收持平但其他應收款異常增加（紅柱突起），則存在高度資產掏空嫌疑：")
-                
-                # --- 將 Matplotlib 圖表嵌入 Word ---
-                if st.session_state['current_fig']:
-                    # 將圖表存入 Buffer
-                    img_buf = io.BytesIO()
-                    st.session_state['current_fig'].savefig(img_buf, format='png', bbox_inches='tight', dpi=300)
-                    img_buf.seek(0)
+         # --- 6. 強化版：深沉敘述與圖表生成 ---
+                st.divider()
+                if st.button("🚀 生成「深沉比對」詳盡鑑定報告"):
+                    doc = Document()
                     
-                    # 嵌入 Word，寬度設定為 6 英吋
-                    doc.add_picture(img_buf, width=Inches(6))
-                    last_paragraph = doc.paragraphs[-1]
-                    last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER # 圖片置中
-                
-                doc.add_paragraph(f"經數據運算，最新年度掏空指數為 {sub.iloc[-1]['掏空指數']}，顯示非本業資產之流出佔比...")
+                    # A. 標題與基本資料
+                    title = doc.add_heading('財務鑑識鑑定意見書', 0)
+                    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    p = doc.add_paragraph()
+                    p.add_run(f"受查單位：{target}\n").bold = True
+                    p.add_run(f"鑑定基準日：2026年4月25日\n")
+                    p.add_run(f"主辦會計師：{auditor}\n")
 
-                # 第參章：結論
-                doc.add_heading('參、 會計師鑑定意見', level=1)
-                final_conc = doc.add_paragraph(f"綜上所述，主辦會計師 {auditor}
+                    # B. 第一章：舞弊與不實分析 (加入深沉文字敘述)
+                    doc.add_heading('壹、 財務舞弊與盈餘操縱深度偵測', level=1)
+                    
+                    latest = sub.iloc[-1]
+                    m_score = latest['M分數']
+                    
+                    # 自動生成深沉敘述文本
+                    if m_score > -1.78:
+                        fraud_desc = (f"【風險預警】本系統經 Beneish M-Score 模型運算，結果為 {m_score}，"
+                                      "超過風險門檻值 -1.78。此數據顯示受查單位在應收帳款認列或損益跨期調整上，"
+                                      "存在顯著的盈餘操縱傾向，建議查核人員需深度盤查該年度之銷貨收入真實性。")
+                    else:
+                        fraud_desc = (f"【查核結論】受查單位之 M-Score 為 {m_score}，處於正常區間。"
+                                      "顯示其帳面利潤與資產成長之關聯性尚屬合理，未偵測到明顯之盈餘管理或財報不實行為。")
+                    
+                    doc.add_paragraph(fraud_desc)
+
+                    # C. 第二章：多年趨勢比對 (圖表與多年度解析)
+                    doc.add_heading('貳、 歷年趨勢比對與資產掏空分析', level=1)
+                    doc.add_paragraph("以下為本所系統產出之歷年趨勢比對圖。鑑識重點在於觀察「營業收入」與「其他應收款」之連動性："
+                                      "若營收下滑但其他應收款逆勢上升，即為資產非法外流（掏空）之典型特徵。")
+
+                    # 插入圖表
+                    if st.session_state['current_fig']:
+                        img_buf = io.BytesIO()
+                        st.session_state['current_fig'].savefig(img_buf, format='png', bbox_inches='tight', dpi=300)
+                        img_buf.seek(0)
+                        doc.add_picture(img_buf, width=Inches(6))
+                        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # 多年數據深沉比對敘述
+                    if len(sub) > 1:
+                        growth_rate = (sub['營收'].iloc[-1] / sub['營收'].iloc[0] - 1) * 100
+                        ar_growth = (sub['應收'].iloc[-1] / sub['應收'].iloc[0] - 1) * 100
+                        doc.add_paragraph(f"縱向比對分析：自 {sub['年度'].min()} 年至 {sub['年度'].max()} 年，"
+                                          f"受查單位營收變動率為 {growth_rate:.2f}%，而應收帳款變動率為 {ar_growth:.2f}%。"
+                                          f"兩者變動幅度之脫節程度（Gap）反映了經營品質的變化...")
+
+                    # D. 第三章：洗錢與現金流安全
+                    doc.add_heading('參、 洗錢風險與資金安全掃描', level=1)
+                    aml_status = "【高風險】" if latest['洗錢風險'] == "注意" else "【低風險】"
+                    doc.add_paragraph(f"洗錢風險判定：{aml_status}。分析發現其現金密度與本期淨利之關聯性...")
+
+                    # E. 結論與建議
+                    doc.add_heading('肆、 綜合鑑定意見', level=1)
+                    doc.add_paragraph(f"綜上所述，主辦會計師 {auditor} 認為：")
+                    doc.add_paragraph("1. 應針對該單位異常之應收帳款進行外部函證。")
+                    doc.add_paragraph("2. 建議對相關利益人交易進行實質審查，以排除資產掏空風險。")
+
+                    # F. 下載功能
+                    buf = io.BytesIO()
+                    doc.save(buf)
+                    buf.seek(0)
+                    st.download_button("📥 點此下載「深沉敘述版」鑑定鑑定報告 (.docx)", buf, f"Forensic_Report_{target}.docx")
