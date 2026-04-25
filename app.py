@@ -3,14 +3,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches
 import io
 import matplotlib.font_manager as fm
 import os
 import requests
 from datetime import datetime
-import pdfplumber  # 導入 PDF 解析工具
+import pdfplumber
 
 # --- 1. 環境設定：中文字體 ---
 @st.cache_resource
@@ -36,131 +35,104 @@ def apply_font_logic(font_path):
     return None
 font_prop = apply_font_logic(font_p)
 
-# --- 2. 數據解析與鑑定引擎 ---
-def parse_pdf_to_df(file):
-    """從 PDF 提取表格數據並轉換為 DataFrame"""
+# --- 2. 強化版 PDF 解析引擎 (解決 Column 不匹配與 Index 錯誤) ---
+def parse_pdf_robustly(file):
+    """強大且具備容錯能力的 PDF 表格提取器"""
     try:
-        all_text = []
+        extracted_data = []
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
-                table = page.extract_table()
-                if table:
-                    all_text.extend(table)
-        # 轉換為 DF 並進行基礎清洗
-        pdf_df = pd.DataFrame(all_text[1:], columns=all_text[0])
-        # 這裡假設 PDF 欄位名稱正確，若不正確需在此處進行對照清洗
-        return pdf_df
+                tables = page.extract_tables()
+                for table in tables:
+                    if len(table) < 2: continue # 跳過過小的雜訊表格
+                    df_tmp = pd.DataFrame(table)
+                    # 清洗：移除全空白行/列
+                    df_tmp = df_tmp.dropna(how='all').dropna(axis=1, how='all')
+                    extracted_data.append(df_tmp)
+        
+        if not extracted_data: return pd.DataFrame()
+
+        # 合併該 PDF 所有頁面的表格
+        full_pdf_df = pd.concat(extracted_data, ignore_index=True)
+        
+        # 關鍵邏輯：在混亂的表格中尋找「會計科目」
+        # 建立一個標準化的字典來對齊數據
+        final_row = {"公司名稱": file.name.replace(".pdf", ""), "年度": 0, "營收": 0, "應收帳款": 0, "存貨": 0}
+        
+        for _, row in full_pdf_df.iterrows():
+            row_str = "".join([str(x) for x in row.values])
+            # 尋找年度 (例如 2019, 112)
+            if "年度" in row_str or "Year" in row_str:
+                for val in row.values:
+                    if str(val).isdigit(): final_row["年度"] = int(val)
+            # 尋找核心數據
+            if "營收" in row_str or "營業收入" in row_str:
+                nums = [pd.to_numeric(str(x).replace(",",""), errors='coerce') for x in row.values if str(x).replace(",","").replace(".","").isdigit()]
+                if nums: final_row["營收"] = nums[0]
+            if "應收帳款" in row_str:
+                nums = [pd.to_numeric(str(x).replace(",",""), errors='coerce') for x in row.values if str(x).replace(",","").replace(".","").isdigit()]
+                if nums: final_row["應收帳款"] = nums[0]
+            if "存貨" in row_str:
+                nums = [pd.to_numeric(str(x).replace(",",""), errors='coerce') for x in row.values if str(x).replace(",","").replace(".","").isdigit()]
+                if nums: final_row["存貨"] = nums[0]
+        
+        return pd.DataFrame([final_row])
     except Exception as e:
-        st.error(f"PDF 解析失敗 ({file.name}): {e}")
+        st.warning(f"檔案 {file.name} 解析受限，請確認 PDF 是否為掃描檔或格式異常。錯誤：{e}")
         return pd.DataFrame()
 
+# --- 3. 鑑識與預測邏輯 ---
 def forensic_engine(row):
-    r = pd.to_numeric(row.get('營收', 0), errors='coerce') or 0
-    rc = pd.to_numeric(row.get('應收帳款', 0), errors='coerce') or 0
-    inv = pd.to_numeric(row.get('存貨', 0), errors='coerce') or 0
-    m_score = -3.2 + (0.15 * (rc/r if r>0 else 0)) + (0.1 * (inv/r if r>0 else 0))
+    r, rc, inv = row.get('營收', 0), row.get('應收帳款', 0), row.get('存貨', 0)
+    if r == 0: return pd.Series([0, "數據不足"])
+    m_score = -3.2 + (0.15 * (rc/r)) + (0.1 * (inv/r))
     status = "風險預警" if m_score > -1.78 else "經營穩健"
     return pd.Series([round(m_score, 2), status])
 
 def get_forecast(df, years=3):
     if len(df) < 2: return pd.DataFrame()
-    last_year = df['年度'].max()
+    df = df.sort_values('年度')
     growth = df['營收'].pct_change().mean()
     curr_rev = df['營收'].iloc[-1]
+    last_year = df['年度'].iloc[-1]
     f_list = []
     for i in range(1, years + 1):
-        curr_rev *= (1 + growth)
-        f_list.append({'年度': f"{int(last_year)+i}(預測)", '營收': round(curr_rev, 2), '分析類型': '未來推估'})
+        curr_rev *= (1 + (growth if not np.isnan(growth) else 0))
+        f_list.append({'年度': f"{int(last_year)+i}(預測)", '營收': round(curr_rev, 2), '類型': '預測'})
     return pd.DataFrame(f_list)
 
-# --- 3. 側邊欄與功能切換 ---
+# --- 4. 側邊欄與介面 ---
 st.set_page_config(layout="wide", page_title="玄武鑑識會計旗艦平台")
 
 with st.sidebar:
     st.header("功能導航中心")
-    analysis_mode = st.radio(
-        "選擇分析模式",
-        [
-            "單一公司：歷年趨勢與財務預測",
-            "單一公司：特定單年深度診斷",
-            "對比模式：單一公司 vs 多家同業",
-            "群體模式：多公司多年風險掃描"
-        ]
-    )
+    analysis_mode = st.radio("選擇分析模式", ["單一公司：趨勢與預測", "單一公司：單年診斷", "對比：單一 vs 同業", "掃描：多公司多年"])
     st.divider()
     auditor = st.text_input("主辦會計師", "張鈞翔會計師")
-    # 支援 PDF 與 Excel 多選上傳
-    files = st.file_uploader("批次上傳數據 (支援 Excel 與 PDF)", type=["xlsx", "pdf"], accept_multiple_files=True)
+    files = st.file_uploader("批次上傳數據 (Excel/PDF)", type=["xlsx", "pdf"], accept_multiple_files=True)
 
-# --- 4. 數據整合流程 ---
+# --- 5. 數據處理流程 ---
 if files:
     all_data = []
     for f in files:
         if f.name.endswith('.xlsx'):
             tmp = pd.read_excel(f)
+            if '公司名稱' not in tmp.columns: tmp['公司名稱'] = f.name.replace(".xlsx", "")
+            all_data.append(tmp)
         elif f.name.endswith('.pdf'):
-            tmp = parse_pdf_to_df(f)
-        
-        if not tmp.empty:
-            if '公司名稱' not in tmp.columns:
-                tmp['公司名稱'] = f.name.replace(".xlsx", "").replace(".pdf", "")
+            tmp = parse_pdf_robustly(f)
             all_data.append(tmp)
     
     if all_data:
-        df = pd.concat(all_data, ignore_index=True)
-        # 數值轉換確保計算正確
-        for col in ['營收', '應收帳款', '存貨', '年度']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
+        df = pd.concat(all_data, ignore_index=True).fillna(0)
         df[['M分數', '結論']] = df.apply(forensic_engine, axis=1)
 
-        # --- 5. 介面呈現 (模式分界) ---
-        if analysis_mode == "單一公司：歷年趨勢與財務預測":
+        # --- 介面呈現 ---
+        if "趨勢與預測" in analysis_mode:
             target = st.selectbox("選擇公司", df['公司名稱'].unique())
             sub = df[df['公司名稱'] == target].sort_values('年度')
-            st.header(f"{target} 深度鑑定與成長預測")
-            
+            st.header(f"{target} 鑑定與預測看板")
             f_df = get_forecast(sub)
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(sub['年度'].astype(str), sub['營收'], marker='o', label='歷史實際營收')
-            if not f_df.empty:
-                ax.plot(f_df['年度'], f_df['營收'], '--', marker='s', color='gray', label='模型預測趨勢')
-            ax.set_title("營收軌跡與 3 年未來預測", fontproperties=font_prop)
-            ax.legend(prop=font_prop)
-            st.pyplot(fig)
-            st.dataframe(sub)
-
-        elif analysis_mode == "對比模式：單一公司 vs 多家同業":
-            year = st.selectbox("比較基準年度", sorted(df['年度'].unique(), reverse=True))
-            target = st.selectbox("主選公司 (標色)", df['公司名稱'].unique())
-            year_df = df[df['年度'] == year]
-            
-            st.header(f"{year} 年度同業風險評比")
-            fig2, ax2 = plt.subplots(figsize=(10, 5))
-            colors = ['red' if c == target else 'skyblue' for c in year_df['公司名稱']]
-            ax2.bar(year_df['公司名稱'], year_df['M分數'], color=colors)
-            ax2.axhline(y=-1.78, color='black', linestyle='--')
-            ax2.set_title(f"風險對照圖 (紅色為主選標的)", fontproperties=font_prop)
-            st.pyplot(fig2)
-
-        # 這裡可繼續加入其餘模式邏輯 (如單年診斷、群體掃描)...
-
-        # --- 6. 報告導出 ---
-        st.divider()
-        col_ex, col_wd = st.columns(2)
-        with col_ex:
-            out_ex = io.BytesIO()
-            df.to_excel(out_ex, index=False)
-            st.download_button("下載整合鑑定底稿 (Excel)", out_ex.getvalue(), "鑑定底稿.xlsx")
-        with col_wd:
-            if st.button("生成綜合報告 (Word)"):
-                doc = Document()
-                doc.add_heading("鑑識會計鑑定報告書", 0).alignment = WD_ALIGN_PARAGRAPH.CENTER
-                doc.add_paragraph(f"主辦會計師：{auditor}\n日期：{datetime.now().strftime('%Y/%m/%d')}")
-                # 報告內容邏輯...
-                buf_word = io.BytesIO()
-                doc.save(buf_word)
-                st.download_button("下載 Word 報告", buf_word.getvalue(), "報告書.docx")
-else:
-    st.info("系統就緒。請上傳數據檔案並選擇分析模式。")
+            ax.plot(sub['年度'].astype(str), sub['營收'], marker='o', label='歷史實際')
+            if not f_df.empty: ax.plot(f_df['年度'], f_df['營收'], '--', marker='s', color='gray', label='預
