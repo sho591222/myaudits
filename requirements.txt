@@ -14,3 +14,10 @@ pandas
 matplotlib
 python-docx
 requests
+streamlit
+pandas
+matplotlib
+python-docx
+xlsxwriter
+openpyxl
+requests
