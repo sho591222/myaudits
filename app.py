@@ -80,7 +80,7 @@ with st.sidebar:
     mode = st.radio("功能模式", ["🔍 單一深度鑑定", "⚔️ 多公司橫向 PK"])
     st.divider()
     uploaded_files = st.file_uploader("上傳財報 PDF (可多選)", type=["pdf"], accept_multiple_files=True)
-    auditor = st.text_input("簽署會計師", "張鈞翔會計師")
+    auditor = st.text_input("簽署會計師", "會計師")
 
 # --- 5. 主程式執行 ---
 if uploaded_files:
